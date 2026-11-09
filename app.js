@@ -166,6 +166,8 @@ function initMap() {
     window.__ready = true;
   });
   map.on('click', onMapClick);
+  map.on('mousedown', startDrag); map.on('touchstart', startDrag); map.on('mousemove', moveDrag); map.on('touchmove', moveDrag); map.on('mouseup', endDrag); map.on('touchend', endDrag); map.on('touchcancel', endDrag);
+  map.on('zoom', renderPtsSoon); map.on('zoomend', renderPts);
   map.on('dblclick', e => { if (tool === 'measure' || tool === 'roi-poly') { e.preventDefault(); finish(); } });
   map.on('mousemove', onMove);
   map.on('moveend', () => { S.view = { center: map.getCenter().toArray(), zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() }; autosave(); });
@@ -184,7 +186,7 @@ function applySettings() {
   $('#dataNote').textContent = dtm ? 'Elevation model: DTM (bare earth) = FABDEM V1-2, Copernicus GLO-30 with trees and buildings removed by machine learning; 30 m. © Univ. Bristol / Fathom, licence CC BY-NC-SA 4.0 (non-commercial use only). Vertical error is a few metres and larger in dense forest and cities.' : 'Elevation model: DSM (surface) = Copernicus GLO-30 (ESA, TanDEM-X 2011–2015, 30 m, vertical accuracy about ±2–4 m). Tree tops and buildings are included.';
   const vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   vis('lines', s.lItems); vis('lines-casing', s.lItems); vis('roi-fill', s.lRoi); vis('roi-line', s.lRoi); vis('viewshed', s.lView); vis('contours', s.lCont); vis('mask', s.lMask); vis('peaks', s.lPeaks);
-  for (const ms of markers.values()) for (const m of ms) m.getElement().style.display = s.lItems ? '' : 'none';
+  renderPts();
 }
 
 /* ---------- ui helpers ---------- */
@@ -208,22 +210,66 @@ function renderPending() {
 }
 
 /* ---------- items ---------- */
-function mkMarker(ll, cls, label, drag, ondrag) {
-  const el = document.createElement('div'); el.className = 'pt ' + cls;
-  if (label) { const l = document.createElement('div'); l.className = 'lb'; l.textContent = label; el.append(l); }
-  const m = new maplibregl.Marker({ element: el, draggable: !!drag }).setLngLat(ll).addTo(map);
-  if (drag) m.on('dragend', () => ondrag(m.getLngLat().toArray()));
-  return m;
+/* Points are drawn as small canvas images draped on the terrain (the same GPU path as the lines), NOT as DOM markers:
+   DOM markers use a CPU elevation lookup that drifted from the drawn terrain when zooming (seen on iPhone). */
+let hoverLL = null, drag = null, ptPool = 0, lastDrag = 0;
+const PCOL = { p: '#40d6c2', m: '#f3b43f', ms: '#f3b43f', v: '#5fd38a', h: '#ffffff' };
+function ptList() {
+  const f = [];
+  for (const it of S.items) {
+    if (it.type === 'point') f.push({ ref: it.id + ':0', ll: it.ll, kind: 'p', label: it.label });
+    if (it.type === 'measure') it.pts.forEach((p, i) => f.push({ ref: it.id + ':' + i, ll: p, kind: i === it.pts.length - 1 ? 'm' : 'ms', label: i === it.pts.length - 1 ? it.label : '' }));
+    if (it.type === 'line') { f.push({ ref: it.id + ':0', ll: it.a, kind: 'p', label: 'A' }); f.push({ ref: it.id + ':1', ll: it.b, kind: 'p', label: 'B' }); }
+  }
+  if (S.viewshed) f.push({ ref: 'vs:0', ll: S.viewshed.ll, kind: 'v', label: 'observer' });
+  if (hoverLL) f.push({ ref: 'h', ll: hoverLL, kind: 'h', label: '', nofd: true });
+  return f;
 }
-function clearMarkers(id) { (markers.get(id) || []).forEach(m => m.remove()); markers.delete(id); }
-function itemMarkers(it) {
-  clearMarkers(it.id); const ms = [];
-  if (it.type === 'point') ms.push(mkMarker(it.ll, '', it.label, true, ll => { it.ll = ll; update(it); }));
-  if (it.type === 'measure') it.pts.forEach((p, i) => ms.push(mkMarker(p, 'm' + (i === it.pts.length - 1 ? '' : ' s'), i === it.pts.length - 1 ? it.label : '', true, ll => { it.pts[i] = ll; update(it); })));
-  if (it.type === 'line') { ms.push(mkMarker(it.a, '', 'A', true, ll => { it.a = ll; update(it); })); ms.push(mkMarker(it.b, '', 'B', true, ll => { it.b = ll; update(it); })); }
-  markers.set(it.id, ms);
-  ms.forEach(m => m.getElement().style.display = S.set.lItems ? '' : 'none');
+const mpp = (lat, z) => 40075016.686 * Math.cos(lat * RAD) / (512 * 2 ** z);
+function renderPts() {
+  if (!map || !map.getSource('pending')) return;
+  const list = S.set.lItems ? ptList() : [], z = map.getZoom(), PX = 70, dpr = 2;
+  list.forEach((f, i) => {
+    const id = 'pt' + i, m = mpp(f.ll[1], z), mLat = 110574, mLon = 111320 * Math.cos(f.ll[1] * RAD);
+    const w = f.ll[0] - PX * m / mLon, e = f.ll[0] + PX * m / mLon, s = f.ll[1] - PX * m / mLat, n = f.ll[1] + PX * m / mLat;
+    const cv = document.createElement('canvas'); cv.width = cv.height = 2 * PX * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
+    const r = f.kind === 'ms' ? 4 : f.kind === 'h' ? 5 : 8, col = PCOL[f.kind];
+    g.beginPath(); g.arc(PX, PX, r + 2.5, 0, 7); g.fillStyle = col + '55'; g.fill();
+    g.beginPath(); g.arc(PX, PX, r, 0, 7); g.fillStyle = col; g.fill(); g.lineWidth = 2; g.strokeStyle = '#04201c'; g.stroke();
+    if (f.label) { g.font = '600 12px JetBrains Mono, monospace'; const tw = g.measureText(f.label).width; g.fillStyle = '#0b1115e6'; g.beginPath(); g.roundRect(PX + r + 6, PX - 10, tw + 12, 20, 5); g.fill(); g.fillStyle = '#dbe7ec'; g.textBaseline = 'middle'; g.fillText(f.label, PX + r + 12, PX + 1); }
+    const coords = [[w, n], [e, n], [e, s], [w, s]], url = cv.toDataURL('image/png');
+    if (!map.getSource(id)) { map.addSource(id, { type: 'image', url, coordinates: coords }); map.addLayer({ id, type: 'raster', source: id, paint: { 'raster-fade-duration': 0, 'raster-resampling': 'linear' } }); }
+    else { map.getSource(id).updateImage({ url, coordinates: coords }); map.setLayoutProperty(id, 'visibility', 'visible'); }
+  });
+  for (let i = list.length; i < ptPool; i++) if (map.getLayer('pt' + i)) map.setLayoutProperty('pt' + i, 'visibility', 'none');
+  ptPool = Math.max(ptPool, list.length);
 }
+let ptT = 0; const renderPtsSoon = () => { if (ptT) return; ptT = setTimeout(() => { ptT = 0; renderPts(); }, 120); };
+function refSet(ref, ll) {
+  const [id, k] = ref.split(':'), i = +k;
+  if (id === 'vs') { S.viewshed.ll = ll; return { vs: true }; }
+  const it = S.items.find(x => x.id === id); if (!it) return null;
+  if (it.type === 'point') it.ll = ll; else if (it.type === 'measure') it.pts[i] = ll; else if (it.type === 'line') { if (i === 0) it.a = ll; else it.b = ll; }
+  return { it };
+}
+function pickPt(lngLat) {
+  let best = null, bd = 1e12; const rad = 22 * mpp(lngLat.lat, map.getZoom());
+  for (const f of ptList()) { if (f.nofd) continue; const d = hav(f.ll, [lngLat.lng, lngLat.lat]); if (d < rad && d < bd) { best = f; bd = d; } }
+  return best;
+}
+function startDrag(e) {
+  const f = pickPt(e.lngLat); if (!f) return;
+  if (e.preventDefault) e.preventDefault(); drag = { ref: f.ref }; map.dragPan.disable(); map.getCanvas().style.cursor = 'grabbing';
+}
+function moveDrag(e) { if (!drag) return; refSet(drag.ref, [e.lngLat.lng, e.lngLat.lat]); renderPts(); }
+async function endDrag() {
+  if (!drag) return; const d = drag; drag = null; lastDrag = Date.now(); map.dragPan.enable(); map.getCanvas().style.cursor = tool ? 'crosshair' : '';
+  const id = d.ref.split(':')[0];
+  if (id === 'vs') { await runViewshed(); autosave(); } else { const it = S.items.find(x => x.id === id); if (it) await update(it); }
+}
+function refGet(ref) { const [id, k] = ref.split(':'), i = +k, it = S.items.find(x => x.id === id); return !it ? null : it.type === 'point' ? it.ll : it.type === 'measure' ? it.pts[i] : (i === 0 ? it.a : it.b); }
+function clearMarkers() { }
+function itemMarkers() { renderPts(); }
 async function update(it) { await compute(it); itemMarkers(it); renderAll(false); if (it.type === 'line' && activeLine === it.id) showProfile(it); autosave(); }
 async function compute(it) {
   if (it.type === 'point') { await DEM.ensureLL([it.ll]); it.elev = DEM.at(...it.ll); const itm = toITM(...it.ll); it.itm = itm; }
@@ -261,7 +307,7 @@ function lineProfile(it) {
 async function onMapClick(e) {
   const ll = [e.lngLat.lng, e.lngLat.lat];
   document.body.classList.remove('open');
-  if (!tool) return;
+  if (!tool || Date.now() - lastDrag < 500) return;
   if (tool === 'pick') { const it = { id: uid(), type: 'point', ll, label: 'P' + (S.items.filter(i => i.type === 'point').length + 1) }; S.items.push(it); await update(it); renderItems(); }
   else if (tool === 'measure') { pending.push(ll); renderPending(); }
   else if (tool === 'roi-poly') { pending.push(ll); renderPending(); }
@@ -299,7 +345,7 @@ function renderAll(markersToo = true) {
   map.getSource('lines').setData({ type: 'FeatureCollection', features: f });
   const rf = []; if (S.roi) rf.push({ type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [roiRing()] } });
   map.getSource('roi').setData({ type: 'FeatureCollection', features: rf });
-  if (markersToo) { for (const id of [...markers.keys()]) clearMarkers(id); S.items.forEach(itemMarkers); }
+  renderPts();
   renderItems();
 }
 const densify = pts => { const o = []; for (let i = 1; i < pts.length; i++) { const n = Math.max(1, Math.ceil(hav(pts[i - 1], pts[i]) / 500)); for (let k = i === 1 ? 0 : 1; k <= n; k++) o.push(slerp(pts[i - 1], pts[i], k / n)); } return o; };
@@ -379,15 +425,14 @@ function drawProfile(r, hoverI) {
   g.fillStyle = '#8ba0ab'; g.textAlign = 'right'; g.fillText(EQ ? 'true scale 1:1 (perpendicular is 90°)' : 'vertical scale exaggerated', W - 8, T + 2);
 }
 const niceStep = s => { const p = 10 ** Math.floor(Math.log10(s)), m = s / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; };
-let hoverMk = null;
 $('#pCanvas').addEventListener('mousemove', ev => {
   const cv = ev.target, G = cv._geo; if (!G) return;
   const x = ev.offsetX, f = Math.min(1, Math.max(0, (x - G.L) / G.w)), i = Math.round(f * G.r.n), r = G.r;
   drawProfile(r, i); const tip = $('#pTip'); tip.hidden = false; tip.style.left = Math.min(x + 10, cv.clientWidth - 160) + 'px';
   tip.textContent = `${km(r.d[i])} · ${fmt(r.z[i], 1)} m`;
-  if (!hoverMk) { const el = document.createElement('div'); el.className = 'pt s'; el.style.background = '#fff'; hoverMk = new maplibregl.Marker({ element: el }).setLngLat(r.pts[i]).addTo(map); } else hoverMk.setLngLat(r.pts[i]);
+  hoverLL = r.pts[i]; renderPts();
 });
-$('#pCanvas').addEventListener('mouseleave', () => { $('#pTip').hidden = true; if (lastRes) drawProfile(lastRes); if (hoverMk) { hoverMk.remove(); hoverMk = null; } });
+$('#pCanvas').addEventListener('mouseleave', () => { $('#pTip').hidden = true; if (lastRes) drawProfile(lastRes); hoverLL = null; renderPts(); });
 window.addEventListener('resize', () => { if (!$('#profile').hidden && lastRes) drawProfile(lastRes); });
 $('#pClose').onclick = () => $('#profile').hidden = true;
 $('#pEq').onclick = () => { EQ = !EQ; $('#pEq').classList.toggle('on', EQ); if (lastRes) drawProfile(lastRes); };
@@ -433,7 +478,7 @@ async function runViewshed() {
     g.putImageData(out, 0, 0);
     v.res = { z0, hObs, R, pct: tot ? 100 * vis / tot : 0, areaKm2: vis * cell * cell / 1e6 };
     v.bbox = bbox; setImage('viewshed', cv, bbox); renderItems();
-    if (!markers.has('vs')) { const m = mkMarker(v.ll, 'v', 'observer', true, async ll => { v.ll = ll; await runViewshed(); autosave(); }); markers.set('vs', [m]); } else markers.get('vs')[0].setLngLat(v.ll);
+    renderPts();
   } finally { busy(false); }
 }
 
