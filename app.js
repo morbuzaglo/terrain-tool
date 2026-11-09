@@ -693,6 +693,7 @@ function bind() {
 function zoomRoi() { if (!S.roi) return; const b = roiBBox(); map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 60 }); }
 
 /* ---------- start ---------- */
+const APP_VERSION = '8';
 (async function () {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (_) { }
   let cur = null; try { cur = localStorage.getItem(LS + '.cur'); } catch (_) { }
@@ -703,7 +704,7 @@ function zoomRoi() { if (!S.roi) return; const b = roiBBox(); map.fitBounds([[b[
   writeSettings(); $('#projName').value = S.name; bind(); initMap();
   renderProjects();
   map.on('load', async () => { busy(true); await tick(); try { for (const it of S.items) await compute(it); if (S.roi) await roiChanged(); renderAll(); if (S.viewshed) await runViewshed(); } finally { busy(false); } });
-  window.__app = { S: () => S, undo, setTool, setMode, exportPdf, H,  DEM, lineProfile, parseCoord, hav, runViewshed };
+  window.__app = { version: APP_VERSION, S: () => S, undo, setTool, setMode, exportPdf, H,  DEM, lineProfile, parseCoord, hav, runViewshed };
 })();
 
 
@@ -775,9 +776,9 @@ async function exportPdf(scope, withTables) {
       const LH = 27, PAD = 9, TW = W - 2 * M;
       for (const sec of sections) {
         const cw = sec.cols.map(c => c[1] * TW), head = () => {
-          g.font = `600 19px ${FONT}`; const hl = sec.cols.map((c, k) => wrap(c[0], cw[k] - 20)), hh = Math.max(...hl.map(l => l.length)) * LH + 2 * PAD;
+          g.font = `600 18px ${FONT}`; const hl = sec.cols.map((c, k) => wrap(c[0], cw[k] - 20)), hh = Math.max(...hl.map(l => l.length)) * LH + 2 * PAD;
           g.fillStyle = '#e3eaee'; g.fillRect(M, y, TW, hh); g.fillStyle = '#10181d';
-          let x = M; hl.forEach((l, k) => { l.forEach((ln, j) => g.fillText(ln, x + 10, y + PAD + j * LH)); x += cw[k]; }); y += hh;
+          let x = M; hl.forEach((l, k) => { g.save(); g.beginPath(); g.rect(x + 2, y, cw[k] - 4, hh); g.clip(); l.forEach((ln, j) => g.fillText(ln, x + 10, y + PAD + j * LH)); g.restore(); x += cw[k]; }); y += hh;
         };
         if (y + 150 > Hh - M) newPage();
         g.font = `700 30px ${FONT}`; g.fillText(sec.t, M, y); y += 46; head();
@@ -785,7 +786,7 @@ async function exportPdf(scope, withTables) {
           g.font = `400 19px ${FONT}`;
           const cells = row.map((t, k) => wrap(t, cw[k] - 20)), n = Math.max(...cells.map(c => c.length)), h = n * LH + 2 * PAD;
           if (y + h > Hh - M) { newPage(); head(); g.font = `400 19px ${FONT}`; }
-          let x = M; cells.forEach((c, k) => { c.forEach((ln, j) => g.fillText(ln, x + 10, y + PAD + j * LH)); x += cw[k]; });
+          let x = M; cells.forEach((c, k) => { g.save(); g.beginPath(); g.rect(x + 2, y, cw[k] - 4, h); g.clip(); c.forEach((ln, j) => g.fillText(ln, x + 10, y + PAD + j * LH)); g.restore(); x += cw[k]; });
           y += h; g.strokeStyle = '#cfd8dd'; g.lineWidth = 1; g.beginPath(); g.moveTo(M, y); g.lineTo(M + TW, y); g.stroke();
         }
         y += 40;
@@ -803,4 +804,5 @@ async function exportPdf(scope, withTables) {
 }
 $('#pdfGo').onclick = () => { const scope = $('#pdfRoi').checked ? 'roi' : 'israel', t = $('#pdfTables').checked; $('#pdfDlg').hidden = true; exportPdf(scope, t); };
 $('#pdfCancel').onclick = () => $('#pdfDlg').hidden = true; $('#pdfClose').onclick = () => $('#pdfDlg').hidden = true;
+$('#pdfLink').onclick = ev => { ev.preventDefault(); const w = window.open(pdfUrl, '_blank'); if (!w) toast('Your browser blocked the new tab. Allow pop-ups for this site, or use Share / save.'); };
 $('#pdfShare').onclick = () => { if (pdfFile) navigator.share({ files: [pdfFile], title: pdfFile.name }).catch(() => { }); };
