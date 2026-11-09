@@ -7,8 +7,10 @@ Elevation = **Copernicus GLO-30** DSM (ESA, TanDEM-X 2011–2015, 30 m, release 
 
 Rebuild: `python tools/build_tiles.py` (needs numpy, scipy, pillow, requests, tifffile, imagecodecs).
 
-### DTM (bare earth), default
-`python tools/build_tiles.py fabdem` builds `tiles_dtm/` from **FABDEM V1-2** (Hawker et al. 2022, University of Bristol / Fathom): Copernicus GLO-30 with trees and buildings removed by machine learning, 30 m. Licence **CC BY-NC-SA 4.0**: non-commercial use only, attribution required, derivatives must carry the same licence. Commercial use needs a licence from the FABDEM authors. The Layers tab switches between DTM (default) and DSM; if `tiles_dtm/` is absent the app falls back to DSM.
+### Elevation models (Layers tab)
+- **DTM – FABDEM V1-2** (default, bare earth, 30 m): `python tools/build_tiles.py fabdem` builds `tiles_dtm/` (Hawker et al. 2022, Univ. Bristol / Fathom; Copernicus GLO-30 with trees and buildings removed by machine learning). Licence **CC BY-NC-SA 4.0**: non-commercial use only, attribution required, share-alike (see `tiles_dtm/LICENSE.txt`). Commercial use needs a licence from the FABDEM authors.
+- **DSM – Copernicus GLO-30** (surface, 30 m): `tiles/`.
+- **Mapterhorn** and **AWS Terrain Tiles (SRTM/ASTER mix)**: streamed online, no files needed; handy as independent cross-checks. Models whose tiles are not installed are greyed out.
 
 ### Higher resolution?
 No open 10 m model exists for Israel: Copernicus EEA-10 is Europe only; Survey of Israel's national DTM (25 m) is restricted; Mapterhorn's "Israel 10 m" layer is derived from ASTER GDEM (30 m native) and is not more accurate.

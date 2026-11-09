@@ -61,21 +61,34 @@ function parseCoord(str) {
 }
 
 /* ---------- DEM (z12 Terrarium tiles decoded to float arrays) ---------- */
+const MODELS = {                                                   // elevation models: local = built by tools/build_tiles.py, url = public tile server (CORS ok)
+  dtm: { name: 'DTM – FABDEM V1-2, bare earth (30 m)', short: 'DTM', local: 'tiles_dtm', ts: 256, att: 'DTM: FABDEM V1-2 © Univ. Bristol (CC BY-NC-SA 4.0)',
+    note: 'DTM (bare earth) = FABDEM V1-2, Copernicus GLO-30 with trees and buildings removed by machine learning; 30 m. © Univ. Bristol / Fathom, licence CC BY-NC-SA 4.0 (non-commercial use only). Vertical error is a few metres, larger in dense forest and cities.' },
+  dsm: { name: 'DSM – Copernicus GLO-30, surface (30 m)', short: 'DSM', local: 'tiles', ts: 256, att: 'DSM: Copernicus GLO-30 © DLR, Airbus, EU, ESA',
+    note: 'DSM (surface) = Copernicus GLO-30 (ESA, TanDEM-X 2011–2015, 30 m, vertical accuracy about ±2–4 m). Tree tops and buildings are included.' },
+  mth: { name: 'Mapterhorn – best-available mix (online)', short: 'Mapterhorn', url: 'https://tiles.mapterhorn.com/{z}/{x}/{y}.webp', ts: 512, att: '© Mapterhorn (mapterhorn.com/attribution)',
+    note: 'Mapterhorn open terrain tiles, streamed online: merges the best open source per area (for Israel mainly Copernicus/ASTER-based data at about 30 m, so not better than GLO-30). Needs internet; the surface type depends on the source.' },
+  aws: { name: 'AWS Terrain Tiles – SRTM/ASTER mix (online)', short: 'AWS Terrain', url: 'https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png', ts: 256, att: 'Terrain: Mapzen / AWS Open Data (SRTM, ASTER, GMTED)',
+    note: 'AWS Open Data terrain tiles (Mapzen): SRTM 1 arc-second (2000) blended with other sources, 30 m, a surface model and older than Copernicus. Streamed online; useful as an independent cross-check.' },
+};
+const AVAIL = {};
+const mdl = () => MODELS[DEM.model] || MODELS.dsm;
 const DEM = {
-  tiles: new Map(), loading: new Map(), model: 'dtm',
-  key(x, y) { return (this.model === 'dtm' ? 1e12 : 0) + x * 100000 + y; },
-  dir() { return this.model === 'dtm' ? 'tiles_dtm' : 'tiles'; },
+  tiles: new Map(), loading: new Map(), model: 'dsm',
+  key(x, y) { return Object.keys(MODELS).indexOf(this.model) * 1e12 + x * 100000 + y; },
+  url(tx, ty) { const m = mdl(); return m.local ? `${m.local}/${ZD}/${tx}/${ty}.png` : m.url.replace('{z}', ZD).replace('{x}', tx).replace('{y}', ty); },
   load(tx, ty) {
-    const k = this.key(tx, ty);
+    const k = this.key(tx, ty), ts = mdl().ts, u = this.url(tx, ty);
     if (this.tiles.has(k)) return Promise.resolve();
     if (this.loading.has(k)) return this.loading.get(k);
-    const p = fetch(`${this.dir()}/${ZD}/${tx}/${ty}.png`).then(r => { if (!r.ok) throw 0; return r.blob(); })
+    const p = fetch(u).then(r => { if (!r.ok) throw 0; return r.blob(); })
       .then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))
       .then(bm => {
-        const c = document.createElement('canvas'); c.width = c.height = 256;
-        const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(bm, 0, 0);
-        const d = x.getImageData(0, 0, 256, 256).data, a = new Float32Array(65536);
-        for (let i = 0; i < 65536; i++) a[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768;
+        const c = document.createElement('canvas'); c.width = c.height = ts;
+        const x = c.getContext('2d', { willReadFrequently: true }); x.drawImage(bm, 0, 0, ts, ts);
+        const d = x.getImageData(0, 0, ts, ts).data, a = new Float32Array(65536), f = ts / 256, dec = i => d[i] * 256 + d[i + 1] + d[i + 2] / 256 - 32768;
+        if (f === 1) for (let i = 0; i < 65536; i++) a[i] = dec(i * 4);
+        else for (let y = 0; y < 256; y++) for (let xx = 0; xx < 256; xx++) { let sum = 0; for (let j = 0; j < f; j++) for (let i = 0; i < f; i++) sum += dec(((y * f + j) * ts + xx * f + i) * 4); a[y * 256 + xx] = sum / (f * f); }   // 512 px tiles are averaged down to the 256 px analysis grid
         this.tiles.set(k, a);
       }).catch(() => { this.tiles.set(k, null); }).finally(() => this.loading.delete(k));    // k captured at start, so a model switch mid-load cannot mix tiles
     this.loading.set(k, p); return p;
@@ -119,7 +132,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 /* ---------- map ---------- */
 const hsPaint = k => ({ 'hillshade-exaggeration': k, 'hillshade-shadow-color': '#05080b', 'hillshade-highlight-color': '#ffffff', 'hillshade-accent-color': '#2a3a44', 'hillshade-illumination-direction': 315 });
-const demSrc = (id, dir, attribution) => ({ [id]: { type: 'raster-dem', tiles: [new URL(dir + '/{z}/{x}/{y}.png', location.href).href.replace(/%7B/g, '{').replace(/%7D/g, '}')], tileSize: 256, minzoom: 7, maxzoom: 12, encoding: 'terrarium', bounds: BOUNDS, ...(attribution ? { attribution } : {}) } });
+const demSrc = (id, m, attribution) => ({ [id]: { type: 'raster-dem', tiles: [m.local ? new URL(m.local + '/{z}/{x}/{y}.png', location.href).href.replace(/%7B/g, '{').replace(/%7D/g, '}') : m.url], tileSize: m.ts, minzoom: m.local ? 7 : 6, maxzoom: 12, encoding: 'terrarium', bounds: BOUNDS, ...(attribution ? { attribution } : {}) } });
 function style() {
   const raster = (id, tiles, att, max = 19) => ({ [id]: { type: 'raster', tiles, tileSize: 256, maxzoom: max, attribution: att } });
   return {
@@ -128,16 +141,12 @@ function style() {
       ...raster('sat', ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], 'Imagery © Esri, Maxar, Earthstar Geographics', 18),
       ...raster('osm', ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], '© OpenStreetMap contributors'),
       ...raster('topo', ['https://tile.opentopomap.org/{z}/{x}/{y}.png'], '© OpenTopoMap (CC-BY-SA), © OpenStreetMap', 17),
-      ...demSrc('dem', 'tiles', 'DSM: Copernicus GLO-30 © DLR, Airbus, EU, ESA'),
-      ...demSrc('hs', 'tiles'),
-      ...demSrc('demd', 'tiles_dtm', 'DTM: FABDEM V1-2 © Univ. Bristol (CC BY-NC-SA 4.0)'),
-      ...demSrc('hsd', 'tiles_dtm'),
+      ...Object.assign({}, ...Object.entries(MODELS).map(([id, m]) => ({ ...demSrc('dem-' + id, m, m.att), ...demSrc('hs-' + id, m) }))),
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#0b1115' } },
       ...['sat', 'topo', 'osm'].map(id => ({ id: 'b-' + id, type: 'raster', source: id, layout: { visibility: 'none' } })),
-      { id: 'hillshade', type: 'hillshade', source: 'hs', paint: hsPaint(0.5) },
-      { id: 'hillshade-dtm', type: 'hillshade', source: 'hsd', paint: hsPaint(0.5) },
+      ...Object.keys(MODELS).map(id => ({ id: 'hillshade-' + id, type: 'hillshade', source: 'hs-' + id, layout: { visibility: 'none' }, paint: hsPaint(0.5) })),
     ]
   };
 }
@@ -176,14 +185,13 @@ function initMap() {
 const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
 
 function applySettings() {
-  const s = S.set; if (!map.getLayer('hillshade')) return;
-  DEM.model = s.model === 'dsm' ? 'dsm' : 'dtm'; const dtm = DEM.model === 'dtm';
+  const s = S.set; if (!map.getLayer('hillshade-dsm')) return;
+  if (!MODELS[s.model] || !AVAIL[s.model]) s.model = AVAIL.dtm ? 'dtm' : 'dsm';
+  DEM.model = s.model; $('#model').value = s.model;
   for (const id of ['sat', 'topo', 'osm']) map.setLayoutProperty('b-' + id, 'visibility', s.base === id ? 'visible' : 'none');
-  map.setLayoutProperty('hillshade', 'visibility', s.lHs && !dtm ? 'visible' : 'none');
-  map.setLayoutProperty('hillshade-dtm', 'visibility', s.lHs && dtm ? 'visible' : 'none');
-  map.setPaintProperty('hillshade', 'hillshade-exaggeration', +s.hs); map.setPaintProperty('hillshade-dtm', 'hillshade-exaggeration', +s.hs);
-  if (s.l3d) map.setTerrain({ source: dtm ? 'demd' : 'dem', exaggeration: +s.ex }); else map.setTerrain(null);
-  $('#dataNote').textContent = dtm ? 'Elevation model: DTM (bare earth) = FABDEM V1-2, Copernicus GLO-30 with trees and buildings removed by machine learning; 30 m. © Univ. Bristol / Fathom, licence CC BY-NC-SA 4.0 (non-commercial use only). Vertical error is a few metres and larger in dense forest and cities.' : 'Elevation model: DSM (surface) = Copernicus GLO-30 (ESA, TanDEM-X 2011–2015, 30 m, vertical accuracy about ±2–4 m). Tree tops and buildings are included.';
+  for (const id of Object.keys(MODELS)) { map.setLayoutProperty('hillshade-' + id, 'visibility', s.lHs && id === s.model ? 'visible' : 'none'); map.setPaintProperty('hillshade-' + id, 'hillshade-exaggeration', +s.hs); }
+  if (s.l3d) map.setTerrain({ source: 'dem-' + s.model, exaggeration: +s.ex }); else map.setTerrain(null);
+  $('#dataNote').textContent = 'Elevation model: ' + MODELS[s.model].note;
   const vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   vis('lines', s.lItems); vis('lines-casing', s.lItems); vis('roi-fill', s.lRoi); vis('roi-line', s.lRoi); vis('viewshed', s.lView); vis('contours', s.lCont); vis('mask', s.lMask); vis('peaks', s.lPeaks);
   renderPts();
@@ -386,7 +394,7 @@ function fly(it) {
 /* ---------- profile chart ---------- */
 function showProfile(it) {
   const r = it.res; if (!r) return;
-  $('#profile').hidden = false; $('#pTitle').textContent = 'Hill line profile · ' + (DEM.model === 'dtm' ? 'DTM' : 'DSM');
+  $('#profile').hidden = false; $('#pTitle').textContent = 'Hill line profile · ' + mdl().short;
   $('#pStats').textContent = `${fmt(r.D, 0)} m · top of hill ${fmt(r.bestEx, 1)} m above line · LOS ${r.visible ? 'clear' : 'blocked'}`;
   requestAnimationFrame(() => drawProfile(r));
 }
@@ -611,9 +619,9 @@ function bind() {
   $('#btnAnalyse').onclick = runAnalysis; $('#btnAnClear').onclick = clearAnalysis;
   $('#btnClearItems').onclick = () => { if (!S.items.length && !S.viewshed) return; S.items.forEach(i => clearMarkers(i.id)); clearMarkers('vs'); S.items = []; S.viewshed = null; setImage('viewshed', null); $('#profile').hidden = true; renderAll(false); autosave(); };
   $('#goForm').onsubmit = async ev => { ev.preventDefault(); const c = parseCoord($('#goInput').value); if (!c) return toast('Enter "lat, lon" or "ITM E N".'); map.flyTo({ center: [c.lon, c.lat], zoom: 13 }); const it = { id: uid(), type: 'point', ll: [c.lon, c.lat], label: 'P' + (S.items.filter(i => i.type === 'point').length + 1) }; S.items.push(it); await update(it); renderItems(); };
-  const recomputeAll = async (clear, msg) => { busy(true); await tick(); if (clear) { DEM.clear(); for (const sid of ['dem', 'hs', 'demd', 'hsd']) { const src = map.getSource(sid); if (src && src.reload) src.reload(); } } try { for (const it of S.items) await compute(it); renderAll(); if (S.roi) await roiChanged(); if (S.viewshed) await runViewshed(); if (analysis) await runAnalysis(); if (msg) toast(msg); } finally { busy(false); } };
+  const recomputeAll = async (clear, msg) => { busy(true); await tick(); if (clear) { DEM.clear(); for (const sid of Object.keys(MODELS).flatMap(i => ['dem-' + i, 'hs-' + i])) { const src = map.getSource(sid); if (src && src.reload) src.reload(); } } try { for (const it of S.items) await compute(it); renderAll(); if (S.roi) await roiChanged(); if (S.viewshed) await runViewshed(); if (analysis) await runAnalysis(); if (msg) toast(msg); } finally { busy(false); } };
   $('#btnRefresh').onclick = () => recomputeAll(true, 'Refreshed');
-  $('#model').addEventListener('change', async () => { readSettings(); applySettings(); autosave(); await recomputeAll(false, 'Elevation model: ' + (S.set.model === 'dtm' ? 'DTM (bare earth)' : 'DSM (surface)')); });
+  $('#model').addEventListener('change', async () => { readSettings(); applySettings(); autosave(); await recomputeAll(false, 'Elevation model: ' + MODELS[S.set.model].short); });
   $('#projName').addEventListener('input', () => { S.name = $('#projName').value; autosave(); });
   $('#pNew').onclick = () => { if (PID) saveNow(); openProject(null, DEF()); };
   $('#pSave').onclick = () => { saveNow(); toast('Saved'); };
@@ -628,8 +636,9 @@ function zoomRoi() { if (!S.roi) return; const b = roiBBox(); map.fitBounds([[b[
 (async function () {
   let cur = null; try { cur = localStorage.getItem(LS + '.cur'); } catch (_) { }
   const a = loadAll(); if (cur && a[cur]) { S = Object.assign(DEF(), a[cur].data); S.set = Object.assign(DEF().set, a[cur].data.set || {}); PID = cur; }
-  const hasDtm = await fetch('tiles_dtm/meta.json', { method: 'HEAD' }).then(r => r.ok).catch(() => false);
-  if (!hasDtm) { S.set.model = 'dsm'; $('#model option[value=dtm]').disabled = true; }
+  for (const [id, m] of Object.entries(MODELS)) AVAIL[id] = m.local ? await fetch(m.local + '/7/76/51.png', { method: 'HEAD' }).then(r => r.ok).catch(() => false) : true;
+  $('#model').innerHTML = Object.entries(MODELS).map(([id, m]) => `<option value="${id}"${AVAIL[id] ? '' : ' disabled'}>${m.name}${AVAIL[id] ? '' : ' (not installed)'}</option>`).join('');
+  if (!AVAIL[S.set.model]) S.set.model = AVAIL.dtm ? 'dtm' : 'dsm';
   writeSettings(); $('#projName').value = S.name; bind(); initMap();
   renderProjects();
   map.on('load', async () => { busy(true); await tick(); try { for (const it of S.items) await compute(it); if (S.roi) await roiChanged(); renderAll(); if (S.viewshed) await runViewshed(); } finally { busy(false); } });
