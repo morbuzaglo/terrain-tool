@@ -191,6 +191,9 @@ function setTool(t) {
   map.getCanvas().style.cursor = tool ? 'crosshair' : '';
 }
 function renderPending() {
+  const multi = tool === 'measure' || tool === 'roi-poly';
+  $('#fab').hidden = !(multi && pending.length >= 1);
+  $('#fFinish').disabled = pending.length < (tool === 'roi-poly' ? 3 : 2);
   if (!map || !map.getSource('pending')) return;
   const f = []; if (pending.length > 1) f.push({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: pending } });
   map.getSource('pending').setData({ type: 'FeatureCollection', features: f });
@@ -249,6 +252,7 @@ function lineProfile(it) {
 /* ---------- map clicks ---------- */
 async function onMapClick(e) {
   const ll = [e.lngLat.lng, e.lngLat.lat];
+  document.body.classList.remove('open');
   if (!tool) return;
   if (tool === 'pick') { const it = { id: uid(), type: 'point', ll, label: 'P' + (S.items.filter(i => i.type === 'point').length + 1) }; S.items.push(it); await update(it); renderItems(); }
   else if (tool === 'measure') { pending.push(ll); renderPending(); }
@@ -345,7 +349,7 @@ function drawProfile(r, hoverI) {
   g.font = '11px JetBrains Mono, monospace'; g.fillStyle = '#8ba0ab'; g.strokeStyle = '#24343e'; g.lineWidth = 1;
   const step = niceStep((hi - lo) / 4);
   for (let v = Math.ceil(lo / step) * step; v < hi; v += step) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(L + w, Y(v)); g.stroke(); g.textAlign = 'right'; g.fillText(fmt(v), L - 6, Y(v) + 4); }
-  const dstep = niceStep(r.D / 6); g.textAlign = 'center';
+  const dstep = niceStep(r.D / (W < 500 ? 3 : 6)); g.textAlign = 'center';
   for (let v = 0; v <= r.D; v += dstep) g.fillText(v >= 1000 ? fmt(v / 1000, v % 1000 ? 1 : 0) + ' km' : fmt(v) + ' m', X(v), H - 8);
   const gr = g.createLinearGradient(0, T, 0, T + h); gr.addColorStop(0, '#7a6a3a'); gr.addColorStop(1, '#2c3a30');
   g.beginPath(); g.moveTo(X(0), Y(lo)); for (let i = 0; i <= r.n; i += Math.max(1, Math.floor(r.n / (w * 1.5)))) g.lineTo(X(r.d[i]), Y(r.eff[i])); g.lineTo(X(r.D), Y(r.eff[r.n])); g.lineTo(X(r.D), Y(lo)); g.closePath(); g.fillStyle = gr; g.fill();
@@ -355,7 +359,8 @@ function drawProfile(r, hoverI) {
   const f = r.dEx / r.D, cz = r.zA + (r.zB - r.zA) * f;                // hill height marker (vertical above chord)
   g.strokeStyle = '#ef6a5b'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(r.dEx), Y(cz)); g.lineTo(X(r.dEx), Y(r.eff[r.iEx])); g.stroke();
   g.fillStyle = '#ef6a5b'; g.beginPath(); g.arc(X(r.dEx), Y(r.eff[r.iEx]), 4, 0, 7); g.fill();
-  g.fillStyle = '#dbe7ec'; g.textAlign = r.dEx > r.D * 0.8 ? 'right' : 'left'; g.fillText(`${fmt(r.bestEx, 1)} m above line · ${fmt(r.zEx, 0)} m asl`, X(r.dEx) + (r.dEx > r.D * 0.8 ? -8 : 8), Y(r.eff[r.iEx]) - 8);
+  const lab = `${fmt(r.bestEx, 1)} m above line · ${fmt(r.zEx, 0)} m asl`, tw = g.measureText(lab).width;
+  g.fillStyle = '#dbe7ec'; g.textAlign = 'left'; g.fillText(lab, Math.max(4, Math.min(W - 4 - tw, X(r.dEx) - tw / 2)), Math.max(T + 10, Y(r.eff[r.iEx]) - 9));
   g.fillStyle = '#40d6c2'; g.beginPath(); g.arc(X(0), Y(r.sA), 4, 0, 7); g.arc(X(r.D), Y(r.sB), 4, 0, 7); g.fill();
   if (hoverI != null) { const x = X(r.d[hoverI]); g.strokeStyle = '#ffffff88'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + h); g.stroke(); }
   cv._geo = { L, w, r };
@@ -531,7 +536,9 @@ function writeSettings() { for (const [k, id] of Object.entries(SETIDS)) { const
 /* ---------- wire up ---------- */
 function bind() {
   $$('#tabs button').forEach(b => b.onclick = () => { $$('#tabs button').forEach(x => x.classList.toggle('on', x === b)); $$('.pane').forEach(p => p.classList.toggle('on', p.dataset.pane === b.dataset.tab)); });
-  $$('[data-tool]').forEach(b => b.onclick = () => { setTool(b.dataset.tool); b.blur(); });
+  $$('[data-tool]').forEach(b => b.onclick = () => { setTool(b.dataset.tool); b.blur(); document.body.classList.remove('open'); });
+  $('#fFinish').onclick = finish; $('#fCancel').onclick = () => setTool(null);
+  const hh = () => document.documentElement.style.setProperty('--hh', $('#top').offsetHeight + 'px'); hh(); addEventListener('resize', hh); if (document.fonts) document.fonts.ready.then(hh);
   $('#btnPanel').onclick = () => document.body.classList.toggle('open');
   const lay = () => { readSettings(); $('#exOut').textContent = (+S.set.ex).toFixed(1) + '×'; $('#pitchOut').textContent = S.set.pitch + '°'; $('#hsOut').textContent = (+S.set.hs).toFixed(2); applySettings(); autosave(); };
   ['base', 'l3d', 'ex', 'hs', 'lHs', 'lItems', 'lRoi', 'lView', 'lCont', 'lMask', 'lPeaks'].forEach(id => $('#' + id).addEventListener('input', lay));
