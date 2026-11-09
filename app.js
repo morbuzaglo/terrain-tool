@@ -49,7 +49,9 @@ function pointInPoly(x, y, ring) {
   return inside;
 }
 function parseCoord(str) {
-  const n = str.replace(/[,;]/g, ' ').trim().split(/\s+/).map(Number);
+  const lab = {}; let t = str.replace(/([EN])\s*[:=]?\s*(-?[\d.]+)|(-?[\d.]+)\s*°?\s*([EN])/gi, (m, l1, v1, v2, l2) => { lab[(l1 || l2).toUpperCase()] = +(v1 || v2); return ' '; });
+  if (lab.E != null && lab.N != null) { const e = lab.E, nn = lab.N; if (Math.abs(e) <= 180 && Math.abs(nn) <= 90) return { lat: nn, lon: e }; return parseCoord(e + ' ' + nn); }   // labelled "E .. / N .."
+  const n = str.replace(/[,;/]/g, ' ').trim().split(/\s+/).map(Number);
   if (n.length < 2 || n.some(isNaN)) return null;
   let [a, b] = n;
   if (Math.abs(a) <= 180 && Math.abs(b) <= 180) {                 // WGS84, lat first (swap if clearly lon first)
