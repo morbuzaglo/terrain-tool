@@ -13,14 +13,15 @@
 <body>
 <div id="app">
   <header id="top">
+    <button id="btnPanel" class="only-narrow" aria-label="Menu">☰</button>
     <div class="brand"><svg viewBox="0 0 32 32" width="22" height="22"><path d="M2 26 11 8l6 10 4-6 9 14z" fill="currentColor"/></svg><b>TERRAIN</b><span>LAB</span></div>
     <input id="projName" class="name" spellcheck="false" title="Project name">
     <div class="spacer"></div>
+    <button id="btnUndo" class="act" title="Undo (Ctrl+Z)" disabled>Undo</button>
+    <button id="btnPdf" class="act" title="Export a PDF report">Export</button>
+    <i class="brk"></i>
     <form id="goForm" class="go"><input id="goInput" placeholder="Go to: 32.08, 34.78  or ITM 180000 665000" spellcheck="false"><button>Go</button></form>
-    <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="btnRedo" title="Redo (Ctrl+Shift+Z)" disabled>↷</button>
-    <button id="btnPdf" title="Export a PDF report">⬇ PDF</button>
-    <button id="btnRefresh" title="Reload tiles and recompute all analyses">⟳ Refresh</button>
-    <button id="btnPanel" class="only-narrow">☰</button>
+    <button id="btnRefresh" class="act" title="Reload tiles and recompute all analyses">Refresh</button>
   </header>
 
   <aside id="panel">
@@ -114,7 +115,7 @@
     <section data-pane="projects" class="pane">
       <div class="row"><button id="pNew" class="primary">New project</button><button id="pSave">Save</button></div>
       <div class="row"><button id="pExport">Export file</button><button id="pImport">Import file</button><input id="pFile" type="file" accept=".json,application/json" hidden></div>
-      <p class="hint">Projects store the view, focus area, points, lines, measurements and settings. They save automatically in this browser; export a file to keep a copy or move it to another computer.</p>
+      <p class="hint">Projects store the view, focus area, points, lines, measurements and settings. They are saved automatically on this device only, so every phone or computer has its own private projects. Browsers can clear site data after long inactivity, so use Export file now and then as a backup, or to move a project to another device.</p>
       <div id="projList" class="items"></div>
     </section>
   </aside>
@@ -125,13 +126,14 @@
     <div class="phead"><b id="pTitle">Profile</b><span id="pStats"></span><button id="pEq" class="mini" title="Equal horizontal and vertical scale">1:1</button><button id="pClose" class="mini">✕</button></div>
     <div id="pWrap"><canvas id="pCanvas"></canvas><div id="pTip" hidden></div></div>
   </section>
-  <div id="toolbar" hidden><div class="tbrow"><b id="tbName"></b><button id="tbAdd" class="on">＋ Add</button><button id="tbEdit">✎ Move</button><button id="tbX" title="Finish this tool">✕</button></div><div id="tbHint"></div></div>
-  <div id="pdfDlg" hidden><div class="dlg"><h3>Export PDF</h3>
+  <div id="toolbar" hidden><div class="tbrow"><b id="tbName"></b><button id="tbAdd" class="on">+ Add</button><button id="tbEdit">Move</button><button id="tbX" title="Finish this tool">✕</button></div><div id="tbHint"></div></div>
+  <div id="pdfDlg" hidden><div class="dlg"><div id="pdfOpt"><h3>Export PDF</h3>
     <label class="chk"><input type="radio" name="pdfScope" id="pdfIsr" checked> Entire Israel map</label>
     <label class="chk"><input type="radio" name="pdfScope" id="pdfRoi"> <span id="pdfRoiTxt">Focus area</span></label>
     <label class="chk"><input type="checkbox" id="pdfTables" checked> Include tables of points, lines and areas</label>
     <p class="hint">The picture is a top view (north up) of what is currently shown on the map: base map, hillshade and your elements. Choose the base map first in the Layers tab.</p>
-    <div class="row"><button id="pdfGo" class="primary">Create PDF</button><button id="pdfCancel">Cancel</button></div></div></div>
+    <div class="row"><button id="pdfGo" class="primary">Create PDF</button><button id="pdfCancel">Cancel</button></div></div>
+    <div id="pdfRes" hidden><h3>PDF ready</h3><div class="row"><a id="pdfLink" class="btn primary" target="_blank" rel="noopener">Download</a><button id="pdfShare" hidden>Share / save to Files</button><button id="pdfClose">Close</button></div></div></div></div>
   <div id="fab" hidden><button id="fFinish" class="primary">Finish</button><button id="fCancel">Cancel</button></div>
   <div id="toast"></div>
   <div id="busy" hidden><span></span>Computing…</div>

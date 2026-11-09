@@ -203,16 +203,17 @@ function applySettings() {
 function toast(t, ms = 2800) { const d = document.createElement('div'); d.textContent = t; $('#toast').append(d); setTimeout(() => d.remove(), ms); }
 const busy = on => $('#busy').hidden = !on;
 const tick = () => new Promise(r => setTimeout(r, 15));
+let sel = null;                                                    // item id whose points can be dragged (edit mode only)
 let mode = 'add';                                                   // 'add' = clicks create, 'edit' = points of the active tool can be moved; no tool = nothing reacts
 const TN = { pick: 'Point', measure: 'Measure distance', line: 'Hill line', view: 'Line of sight', 'roi-circle': 'Focus circle', 'roi-poly': 'Focus polygon' };
 const TH = { pick: 'Tap the map to drop a point and read its coordinates and elevation.', measure: 'Tap points along the path. Double-click or Finish to end.', line: 'Tap point A, then point B. The profile shows the highest ground between them.', view: 'Tap the observer position. Green = visible from there.', 'roi-circle': 'Tap the centre of the focus circle (radius is set in the Area tab).', 'roi-poly': 'Tap the polygon corners. Double-click or Finish to close it.' };
 function setTool(t) {
-  tool = tool === t ? null : t; mode = 'add'; pending = []; renderPending();
+  tool = tool === t ? null : t; mode = 'add'; sel = null; pending = []; renderPending(); renderPts();
   $$('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === tool)); toolUI();
 }
-function setMode(m) { mode = m; pending = []; renderPending(); toolUI(); }
+function setMode(m, id) { mode = m; sel = m === 'edit' ? (id || null) : null; pending = []; renderPending(); toolUI(); renderPts(); }
 function toolUI() {
-  const roi = !!tool && tool.startsWith('roi'), hint = !tool ? 'Choose a tool, then tap the map. Esc ends the tool.' : mode === 'add' ? TH[tool] : 'Drag the points to move them. ＋ Add creates another one, ✕ finishes the tool.';
+  const roi = !!tool && tool.startsWith('roi'), hint = !tool ? 'Choose a tool, then tap the map. Esc ends the tool.' : mode === 'add' ? TH[tool] : 'Tap a point to select it (highlighted), then drag it. + Add creates another, ✕ finishes.';
   $('#toolbar').hidden = !tool;
   if (tool) { $('#tbName').textContent = TN[tool]; $('#tbAdd').classList.toggle('on', mode === 'add'); $('#tbEdit').classList.toggle('on', mode === 'edit'); $('#tbEdit').hidden = roi; $('#tbHint').textContent = hint; }
   $('#toolHint').textContent = hint;
@@ -236,11 +237,11 @@ function ptList() {
   const f = [];
   for (const it of S.items) {
     const pre = it.name ? it.name + ' ' : '';
-    if (it.type === 'point') f.push({ ref: it.id + ':0', ll: it.ll, kind: 'p', label: it.name || it.label, tt: 'pick' });
-    if (it.type === 'measure') it.pts.forEach((p, i) => f.push({ ref: it.id + ':' + i, ll: p, kind: i === it.pts.length - 1 ? 'm' : 'ms', label: i === it.pts.length - 1 ? pre + (it.label || '') : '', tt: 'measure' }));
-    if (it.type === 'line') { f.push({ ref: it.id + ':0', ll: it.a, kind: 'p', label: pre + 'A', tt: 'line' }); f.push({ ref: it.id + ':1', ll: it.b, kind: 'p', label: pre + 'B', tt: 'line' }); }
+    if (it.type === 'point') f.push({ ref: it.id + ':0', ll: it.ll, kind: 'p', label: it.name || it.label, tt: 'pick', sel: sel === it.id });
+    if (it.type === 'measure') it.pts.forEach((p, i) => f.push({ ref: it.id + ':' + i, ll: p, kind: i === it.pts.length - 1 ? 'm' : 'ms', label: i === it.pts.length - 1 ? pre + (it.label || '') : '', tt: 'measure', sel: sel === it.id }));
+    if (it.type === 'line') { f.push({ ref: it.id + ':0', ll: it.a, kind: 'p', label: pre + 'A', tt: 'line', sel: sel === it.id }); f.push({ ref: it.id + ':1', ll: it.b, kind: 'p', label: pre + 'B', tt: 'line', sel: sel === it.id }); }
   }
-  if (S.viewshed) f.push({ ref: 'vs:0', ll: S.viewshed.ll, kind: 'v', label: S.viewshed.name || 'observer', tt: 'view' });
+  if (S.viewshed) f.push({ ref: 'vs:0', ll: S.viewshed.ll, kind: 'v', label: S.viewshed.name || 'observer', tt: 'view', sel: sel === 'vs' });
   if (hoverLL) f.push({ ref: 'h', ll: hoverLL, kind: 'h', label: '', nofd: true });
   return f;
 }
@@ -253,6 +254,7 @@ function renderPts() {
     const w = f.ll[0] - PX * m / mLon, e = f.ll[0] + PX * m / mLon, s = f.ll[1] - PX * m / mLat, n = f.ll[1] + PX * m / mLat;
     const cv = document.createElement('canvas'); cv.width = cv.height = 2 * PX * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
     const r = f.kind === 'ms' ? 4 : f.kind === 'h' ? 5 : 8, col = PCOL[f.kind];
+    if (f.sel && tool && mode === 'edit') { g.beginPath(); g.arc(PX, PX, r + 7, 0, 7); g.lineWidth = 3; g.strokeStyle = '#ffffff'; g.stroke(); }
     g.beginPath(); g.arc(PX, PX, r + 2.5, 0, 7); g.fillStyle = col + '55'; g.fill();
     g.beginPath(); g.arc(PX, PX, r, 0, 7); g.fillStyle = col; g.fill(); g.lineWidth = 2; g.strokeStyle = '#04201c'; g.stroke();
     if (f.label) { g.font = '600 12px JetBrains Mono, monospace'; let lb = f.label; const room = PX - r - 20; while (lb.length > 1 && g.measureText(lb).width > room) lb = lb.slice(0, -1); if (lb !== f.label) lb = lb.slice(0, -1) + '…'; const tw = g.measureText(lb).width; g.fillStyle = '#0b1115e6'; g.beginPath(); g.roundRect(PX + r + 6, PX - 10, tw + 12, 20, 5); g.fill(); g.fillStyle = '#dbe7ec'; g.textBaseline = 'middle'; g.fillText(lb, PX + r + 12, PX + 1); }
@@ -271,9 +273,9 @@ function refSet(ref, ll) {
   if (it.type === 'point') it.ll = ll; else if (it.type === 'measure') it.pts[i] = ll; else if (it.type === 'line') { if (i === 0) it.a = ll; else it.b = ll; }
   return { it };
 }
-function pickPt(lngLat) {
+function pickPt(lngLat, onlySel = true) {
   let best = null, bd = 1e12; const rad = 22 * mpp(lngLat.lat, map.getZoom());
-  for (const f of ptList()) { if (f.nofd || f.tt !== tool) continue; const d = hav(f.ll, [lngLat.lng, lngLat.lat]); if (d < rad && d < bd) { best = f; bd = d; } }
+  for (const f of ptList()) { if (f.nofd || f.tt !== tool || (onlySel && f.sel !== true)) continue; const d = hav(f.ll, [lngLat.lng, lngLat.lat]); if (d < rad && d < bd) { best = f; bd = d; } }
   return best;
 }
 function startDrag(e) {
@@ -324,10 +326,10 @@ function lineProfile(it) {
 }
 
 /* ---------- undo / redo (items, focus area, line-of-sight point) ---------- */
-const H = [], RD = [];
+const H = [];
 const snap = () => { const o = slim(); return JSON.stringify({ items: o.items, roi: o.roi, viewshed: o.viewshed }); };
-function commit() { H.push(snap()); if (H.length > 60) H.shift(); RD.length = 0; histUI(); }
-function histUI() { $('#btnUndo').disabled = !H.length; $('#btnRedo').disabled = !RD.length; }
+function commit() { H.push(snap()); if (H.length > 60) H.shift(); histUI(); }
+function histUI() { $('#btnUndo').disabled = !H.length; }
 async function restore(str) {
   const o = JSON.parse(str); S.items = o.items; S.roi = o.roi; S.viewshed = o.viewshed;
   if (!S.viewshed) setImage('viewshed', null);
@@ -336,29 +338,29 @@ async function restore(str) {
   try { for (const it of S.items) await compute(it); if (S.roi) await roiChanged(); else $('#roiInfo').textContent = ''; renderAll(); if (S.viewshed) await runViewshed(); } finally { busy(false); }
   histUI(); autosave();
 }
-async function undo() { if (!H.length) return; RD.push(snap()); await restore(H.pop()); }
-async function redo() { if (!RD.length) return; H.push(snap()); await restore(RD.pop()); }
+async function undo() { if (!H.length) return; await restore(H.pop()); }
 
 /* ---------- map clicks ---------- */
 async function onMapClick(e) {
   const ll = [e.lngLat.lng, e.lngLat.lat];
   document.body.classList.remove('open');
+  if (tool && mode === 'edit' && Date.now() - lastDrag >= 500) { const f = pickPt(e.lngLat, false); sel = f ? f.ref.split(':')[0] : null; renderPts(); return; }
   if (!tool || mode !== 'add' || Date.now() - lastDrag < 500) return;
-  if (tool === 'pick') { commit(); const it = { id: uid(), type: 'point', ll, label: 'P' + (S.items.filter(i => i.type === 'point').length + 1) }; S.items.push(it); await update(it); renderItems(); setMode('edit'); }
+  if (tool === 'pick') { commit(); const it = { id: uid(), type: 'point', ll, label: 'P' + (S.items.filter(i => i.type === 'point').length + 1) }; S.items.push(it); await update(it); renderItems(); setMode('edit', it.id); }
   else if (tool === 'measure') { pending.push(ll); renderPending(); }
   else if (tool === 'roi-poly') { pending.push(ll); renderPending(); }
   else if (tool === 'line') {
     pending.push(ll);
-    if (pending.length === 2) { commit(); const it = { id: uid(), type: 'line', a: pending[0], b: pending[1] }; pending = []; renderPending(); S.items.push(it); activeLine = it.id; busy(true); await tick(); await update(it); busy(false); renderItems(); setMode('edit'); }
+    if (pending.length === 2) { commit(); const it = { id: uid(), type: 'line', a: pending[0], b: pending[1] }; pending = []; renderPending(); S.items.push(it); activeLine = it.id; busy(true); await tick(); await update(it); busy(false); renderItems(); setMode('edit', it.id); }
     else renderPending();
   }
-  else if (tool === 'view') { commit(); S.viewshed = { ll }; await runViewshed(); setMode('edit'); }
+  else if (tool === 'view') { commit(); S.viewshed = { ll }; await runViewshed(); setMode('edit', 'vs'); }
   else if (tool === 'roi-circle') { commit(); S.roi = { type: 'circle', c: ll, r: +$('#roiR').value * 1000 }; await roiChanged(); setTool(null); }
   autosave();
 }
 async function finish() {
   while (pending.length > 1 && hav(pending[pending.length - 1], pending[pending.length - 2]) < 1) pending.pop();   // a double-click adds the last point twice
-  if (tool === 'measure' && pending.length > 1) { commit(); const it = { id: uid(), type: 'measure', pts: pending.slice() }; pending = []; renderPending(); S.items.push(it); await update(it); renderItems(); setMode('edit'); }
+  if (tool === 'measure' && pending.length > 1) { commit(); const it = { id: uid(), type: 'measure', pts: pending.slice() }; pending = []; renderPending(); S.items.push(it); await update(it); renderItems(); setMode('edit', it.id); }
   else if (tool === 'roi-poly' && pending.length > 2) { commit(); S.roi = { type: 'poly', pts: pending.slice() }; pending = []; renderPending(); await roiChanged(); setTool(null); }
   autosave();
 }
@@ -400,7 +402,7 @@ function renderItems() {
     if (it.type === 'measure') { title = dn(it) + ' ' + km(it.flat || 0); body = `Air distance  ${fmt(it.flat, 1)} m\nAlong terrain ${fmt(it.surf, 1)} m\nClimb ${fmt(it.up, 0)} m · descent ${fmt(it.down, 0)} m\nBearing first leg ${fmt(bearing(it.pts[0], it.pts[1]), 1)}°`; }
     if (it.type === 'line' && it.res) {
       const r = it.res; title = `${dn(it)} ${km(r.D)}`;
-      body = `Air distance ${fmt(r.D, 1)} m · bearing ${fmt(bearing(it.a, it.b), 1)}°\nA ${fmt(r.zA, 1)} m  →  B ${fmt(r.zB, 1)} m\nHighest ground on line ${fmt(r.maxZ, 1)} m at ${km(r.dMax)}\nHeight above the A–B line ${fmt(r.bestEx, 1)} m (perpendicular ${fmt(r.perp, 1)} m)\nat ${km(r.dEx)}, ground ${fmt(r.zEx, 1)} m\nLine of sight ${r.visible ? '<span class="ok">CLEAR</span> (margin ' + fmt(r.minClr, 1) + ' m)' : '<span class="no">BLOCKED</span> (by ' + fmt(-r.minClr, 1) + ' m at ' + km(r.d[r.iClr]) + ')'}`;
+      body = `Air distance ${fmt(r.D, 1)} m · bearing ${fmt(bearing(it.a, it.b), 1)}°\nA ${fmt(r.zA, 1)} m  →  B ${fmt(r.zB, 1)} m\nHighest ground on line ${fmt(r.maxZ, 1)} m at ${km(r.dMax)}\nHill height above the straight A–B line: ${fmt(r.perp, 1)} m (measured at 90° to the line; ${fmt(r.bestEx, 1)} m straight up)\nsummit ${fmt(r.zEx, 1)} m above sea level, ${km(r.dEx)} from A\nLine of sight ${r.visible ? '<span class="ok">CLEAR</span> (margin ' + fmt(r.minClr, 1) + ' m)' : '<span class="no">BLOCKED</span> (by ' + fmt(-r.minClr, 1) + ' m at ' + km(r.d[r.iClr]) + ')'}`;
     }
     if (it.type === 'view') { const v = S.viewshed.res; title = S.viewshed.name || 'Line of sight area'; body = `Observer ${S.viewshed.ll[1].toFixed(5)}, ${S.viewshed.ll[0].toFixed(5)}\nGround ${fmt(v.z0, 1)} m + ${v.hObs} m\nRadius ${km(v.R)} · visible ${fmt(v.pct, 1)}% (${fmt(v.areaKm2, 2)} km²)`; }
     if (it.type === 'roi') { const r = S.roi; title = r.name || 'Focus area'; body = (r.type === 'circle' ? `Circle · centre ${r.c[1].toFixed(5)}, ${r.c[0].toFixed(5)}\nradius ${km(r.r)}` : `Polygon · ${r.pts.length} corners`) + ` · ${fmt((r.type === 'circle' ? Math.PI * r.r ** 2 : polyArea(r.pts)) / 1e6, 2)} km²`; el.className = 'item m'; }
@@ -434,7 +436,7 @@ function fly(it) {
 function showProfile(it) {
   const r = it.res; if (!r) return;
   $('#profile').hidden = false; $('#pTitle').textContent = 'Hill line profile · ' + mdl().short;
-  $('#pStats').textContent = `${fmt(r.D, 0)} m · top of hill ${fmt(r.bestEx, 1)} m above line · LOS ${r.visible ? 'clear' : 'blocked'}`;
+  $('#pStats').textContent = `${fmt(r.D, 0)} m · hill ${fmt(r.perp, 1)} m above line A–B (at 90°), summit ${fmt(r.zEx, 0)} m above sea level · LOS ${r.visible ? 'clear' : 'blocked'}`;
   requestAnimationFrame(() => drawProfile(r));
 }
 let lastRes = null, EQ = false;
@@ -464,12 +466,12 @@ function drawProfile(r, hoverI) {
   if (EQ) { const dz = r.zB - r.zA, t = (r.dEx * r.D + (r.eff[r.iEx] - r.zA) * dz) / (r.D * r.D + dz * dz); g.moveTo(X(t * r.D), Y(r.zA + t * dz)); } else g.moveTo(X(r.dEx), Y(cz));
   g.lineTo(X(r.dEx), Y(r.eff[r.iEx])); g.stroke();
   g.fillStyle = '#ef6a5b'; g.beginPath(); g.arc(X(r.dEx), Y(r.eff[r.iEx]), 4, 0, 7); g.fill();
-  const lab = `${fmt(r.bestEx, 1)} m above line · ${fmt(r.zEx, 0)} m asl`, tw = g.measureText(lab).width;
+  const lab = `Hill ${fmt(r.perp, 1)} m above line A–B`, tw = g.measureText(lab).width;
   g.fillStyle = '#dbe7ec'; g.textAlign = 'left'; g.fillText(lab, Math.max(4, Math.min(W - 4 - tw, X(r.dEx) - tw / 2)), Math.max(T + 10, Y(r.eff[r.iEx]) - 9));
   g.fillStyle = '#40d6c2'; g.beginPath(); g.arc(X(0), Y(r.sA), 4, 0, 7); g.arc(X(r.D), Y(r.sB), 4, 0, 7); g.fill();
   if (hoverI != null) { const x = X(r.d[hoverI]); g.strokeStyle = '#ffffff88'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + h); g.stroke(); }
   cv._geo = { L, w, r };
-  g.fillStyle = '#8ba0ab'; g.textAlign = 'right'; g.fillText(EQ ? 'true scale 1:1 (perpendicular is 90°)' : 'vertical scale exaggerated', W - 8, T + 2);
+  g.fillStyle = '#8ba0ab'; g.textAlign = 'right'; g.fillText(EQ ? 'true scale 1:1' : 'vertical scale exaggerated', L + w - 6, T + h0 - 8);
 }
 const niceStep = s => { const p = 10 ** Math.floor(Math.log10(s)), m = s / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; };
 $('#pCanvas').addEventListener('mousemove', ev => {
@@ -627,7 +629,7 @@ function renderProjects() {
 }
 async function openProject(id, data) {
   const a = loadAll(); const d = data || (a[id] && a[id].data); if (!d) return;
-  for (const k of [...markers.keys()]) clearMarkers(k); H.length = 0; RD.length = 0; histUI(); if (tool) setTool(tool); clearAnalysis(); setImage('viewshed', null); $('#profile').hidden = true;
+  for (const k of [...markers.keys()]) clearMarkers(k); H.length = 0; histUI(); if (tool) setTool(tool); clearAnalysis(); setImage('viewshed', null); $('#profile').hidden = true;
   S = Object.assign(DEF(), d); S.set = Object.assign(DEF().set, d.set || {}); PID = id || null; if (!id) PID = null;
   writeSettings(); applySettings(); $('#projName').value = S.name;
   map.jumpTo({ center: S.view.center, zoom: S.view.zoom, pitch: S.view.pitch, bearing: S.view.bearing });
@@ -645,7 +647,7 @@ function bind() {
   $$('[data-tool]').forEach(b => b.onclick = () => { setTool(b.dataset.tool); b.blur(); document.body.classList.remove('open'); });
   $('#fFinish').onclick = finish; $('#fCancel').onclick = () => { pending = []; renderPending(); };
   $('#tbX').onclick = () => setTool(tool); $('#tbAdd').onclick = () => setMode('add'); $('#tbEdit').onclick = () => setMode('edit');
-  $('#btnUndo').onclick = undo; $('#btnRedo').onclick = redo; histUI();
+  $('#btnUndo').onclick = undo; histUI();
   $('#btnPdf').onclick = openPdf;
   const hh = () => document.documentElement.style.setProperty('--hh', $('#top').offsetHeight + 'px'); hh(); addEventListener('resize', hh); if (document.fonts) document.fonts.ready.then(hh);
   $('#btnPanel').onclick = () => document.body.classList.toggle('open');
@@ -671,12 +673,13 @@ function bind() {
   $('#pExport').onclick = () => { readSettings(); const b = new Blob([JSON.stringify({ app: 'israel-terrain-lab', ...slim() }, null, 1)], { type: 'application/json' }), a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = (S.name || 'project').replace(/[^\w\-]+/g, '_') + '.terrain.json'; a.click(); };
   $('#pImport').onclick = () => $('#pFile').click();
   $('#pFile').onchange = async ev => { const f = ev.target.files[0]; if (!f) return; try { const d = JSON.parse(await f.text()); if (!d.items || !d.set) throw 0; await openProject(null, d); } catch (_) { toast('Not a Terrain Lab project file.'); } ev.target.value = ''; };
-  window.addEventListener('keydown', ev => { if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return; if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); ev.shiftKey ? redo() : undo(); return; } if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'y') { ev.preventDefault(); redo(); return; } if (ev.key === 'Escape') { if (pending.length) { pending = []; renderPending(); } else setTool(null); } if (ev.key === 'Enter') { ev.preventDefault(); finish(); } });
+  window.addEventListener('keydown', ev => { if (ev.target.tagName === 'INPUT' || ev.target.tagName === 'SELECT') return; if ((ev.ctrlKey || ev.metaKey) && ev.key.toLowerCase() === 'z') { ev.preventDefault(); undo(); return; } if (ev.key === 'Escape') { if (pending.length) { pending = []; renderPending(); } else setTool(null); } if (ev.key === 'Enter') { ev.preventDefault(); finish(); } });
 }
 function zoomRoi() { if (!S.roi) return; const b = roiBBox(); map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 60 }); }
 
 /* ---------- start ---------- */
 (async function () {
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (_) { }
   let cur = null; try { cur = localStorage.getItem(LS + '.cur'); } catch (_) { }
   const a = loadAll(); if (cur && a[cur]) { S = Object.assign(DEF(), a[cur].data); S.set = Object.assign(DEF().set, a[cur].data.set || {}); PID = cur; }
   for (const [id, m] of Object.entries(MODELS)) AVAIL[id] = m.local ? await fetch(m.local + '/7/76/51.png', { method: 'HEAD' }).then(r => r.ok).catch(() => false) : true;
@@ -685,12 +688,13 @@ function zoomRoi() { if (!S.roi) return; const b = roiBBox(); map.fitBounds([[b[
   writeSettings(); $('#projName').value = S.name; bind(); initMap();
   renderProjects();
   map.on('load', async () => { busy(true); await tick(); try { for (const it of S.items) await compute(it); if (S.roi) await roiChanged(); renderAll(); if (S.viewshed) await runViewshed(); } finally { busy(false); } });
-  window.__app = { S: () => S, undo, redo, setTool, setMode, exportPdf, H,  DEM, lineProfile, parseCoord, hav, runViewshed };
+  window.__app = { S: () => S, undo, setTool, setMode, exportPdf, H,  DEM, lineProfile, parseCoord, hav, runViewshed };
 })();
 
 
 /* ---------- PDF export: top-view map picture + tables of the created elements ---------- */
 function openPdf() {
+  $('#pdfOpt').hidden = false; $('#pdfRes').hidden = true;
   $('#pdfRoi').disabled = !S.roi; if (!S.roi) $('#pdfIsr').checked = true; $('#pdfRoiTxt').textContent = S.roi ? (S.roi.name || 'Focus area') : 'Focus area (none created yet)';
   $('#pdfDlg').hidden = false; document.body.classList.remove('open');
 }
@@ -705,6 +709,7 @@ async function captureTop(bb) {
   map.jumpTo(prev); return out;
 }
 const loadImg = url => new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = url; });
+let pdfUrl = null, pdfFile = null;
 async function exportPdf(scope, withTables) {
   if (!window.jspdf) { toast('PDF library did not load (offline?).'); return; }
   busy(true); await tick();
@@ -744,8 +749,8 @@ async function exportPdf(scope, withTables) {
       const sections = [];
       const pts = S.items.filter(i => i.type === 'point'), lines = S.items.filter(i => i.type === 'line' && i.res), ms = S.items.filter(i => i.type === 'measure');
       if (pts.length) sections.push({ t: 'Points', cols: [['Name', .16], ['Latitude, longitude', .30], ['ITM E / N', .30], ['Elevation (m)', .24]], rows: pts.map(i => [dn(i), ll(i.ll), itm(i.ll), fmt(i.elev, 1)]) });
-      if (lines.length) sections.push({ t: 'Hill lines', cols: [['Name', .12], ['A  (lat, lon · elev)', .2], ['B  (lat, lon · elev)', .2], ['Air distance · bearing', .14], ['Hill above the A–B line', .19], ['Line of sight', .15]],
-        rows: lines.map(i => { const r = i.res; return [dn(i), `${ll(i.a)}\n${fmt(r.zA, 1)} m`, `${ll(i.b)}\n${fmt(r.zB, 1)} m`, `${fmt(r.D, 1)} m\n${fmt(bearing(i.a, i.b), 1)}°`, `${fmt(r.bestEx, 1)} m vertical\n${fmt(r.perp, 1)} m perpendicular\nat ${km(r.dEx)}, ground ${fmt(r.zEx, 1)} m`, r.visible ? `Clear\nmargin ${fmt(r.minClr, 1)} m` : `Blocked\nby ${fmt(-r.minClr, 1)} m`]; }) });
+      if (lines.length) sections.push({ t: 'Hill lines', cols: [['Name', .12], ['A  (lat, lon · elev)', .2], ['B  (lat, lon · elev)', .2], ['Air distance · bearing', .14], ['Hill height above line A–B', .19], ['Line of sight', .15]],
+        rows: lines.map(i => { const r = i.res; return [dn(i), `${ll(i.a)}\n${fmt(r.zA, 1)} m`, `${ll(i.b)}\n${fmt(r.zB, 1)} m`, `${fmt(r.D, 1)} m\n${fmt(bearing(i.a, i.b), 1)}°`, `${fmt(r.perp, 1)} m at 90° to the line\n${fmt(r.bestEx, 1)} m straight up\nsummit ${fmt(r.zEx, 1)} m, ${km(r.dEx)} from A`, r.visible ? `Clear\nmargin ${fmt(r.minClr, 1)} m` : `Blocked\nby ${fmt(-r.minClr, 1)} m`]; }) });
       if (ms.length) sections.push({ t: 'Distance measurements', cols: [['Name', .14], ['Vertices (lat, lon)', .36], ['Air distance', .16], ['Along terrain', .16], ['Climb / descent', .18]],
         rows: ms.map(i => [dn(i), i.pts.map(ll).join('\n'), `${fmt(i.flat, 1)} m`, `${fmt(i.surf, 1)} m`, `+${fmt(i.up, 0)} m / −${fmt(i.down, 0)} m`]) });
       if (S.viewshed && S.viewshed.res) { const v = S.viewshed.res; sections.push({ t: 'Line of sight area', cols: [['Name', .16], ['Observer (lat, lon)', .28], ['Height', .2], ['Radius', .12], ['Visible', .24]], rows: [[S.viewshed.name || 'Line of sight area', ll(S.viewshed.ll), `ground ${fmt(v.z0, 1)} m + ${v.hObs} m`, km(v.R), `${fmt(v.pct, 1)} % (${fmt(v.areaKm2, 2)} km²)`]] }); }
@@ -773,9 +778,13 @@ async function exportPdf(scope, withTables) {
     pages.forEach((c, i) => { const x = c.getContext('2d'); x.font = `400 15px ${FONT}`; x.fillStyle = '#6a7a84'; x.textBaseline = 'top'; x.fillText(`Terrain Lab  ·  page ${i + 1} of ${pages.length}`, M, Hh - 44); });
     const doc = new window.jspdf.jsPDF({ orientation: land ? 'l' : 'p', unit: 'mm', format: 'a4' }), pw = land ? 297 : 210, ph = land ? 210 : 297;
     pages.forEach((c, i) => { if (i) doc.addPage(); doc.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, pw, ph, undefined, 'FAST'); });
-    doc.save((S.name || 'terrain').replace(/[\\/:*?"<>|]+/g, '_') + '.pdf');
-    toast('PDF saved');
+    const fname = (S.name || 'terrain').replace(/[\\/:*?"<>|]+/g, '_') + '.pdf', blob = doc.output('blob');
+    if (pdfUrl) URL.revokeObjectURL(pdfUrl); pdfUrl = URL.createObjectURL(blob);
+    const a = $('#pdfLink'); a.href = pdfUrl; a.download = fname; a.textContent = 'Download ' + fname; pdfFile = new File([blob], fname, { type: 'application/pdf' });
+    $('#pdfShare').hidden = !(navigator.canShare && navigator.canShare({ files: [pdfFile] }));
+    $('#pdfOpt').hidden = true; $('#pdfRes').hidden = false; $('#pdfDlg').hidden = false;
   } catch (e) { console.error(e); toast('PDF export failed: ' + (e && e.message || e)); } finally { busy(false); }
 }
 $('#pdfGo').onclick = () => { const scope = $('#pdfRoi').checked ? 'roi' : 'israel', t = $('#pdfTables').checked; $('#pdfDlg').hidden = true; exportPdf(scope, t); };
-$('#pdfCancel').onclick = () => $('#pdfDlg').hidden = true;
+$('#pdfCancel').onclick = () => $('#pdfDlg').hidden = true; $('#pdfClose').onclick = () => $('#pdfDlg').hidden = true;
+$('#pdfShare').onclick = () => { if (pdfFile) navigator.share({ files: [pdfFile], title: pdfFile.name }).catch(() => { }); };
