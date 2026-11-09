@@ -17,6 +17,8 @@
     <input id="projName" class="name" spellcheck="false" title="Project name">
     <div class="spacer"></div>
     <form id="goForm" class="go"><input id="goInput" placeholder="Go to: 32.08, 34.78  or ITM 180000 665000" spellcheck="false"><button>Go</button></form>
+    <button id="btnUndo" title="Undo (Ctrl+Z)" disabled>↶</button><button id="btnRedo" title="Redo (Ctrl+Shift+Z)" disabled>↷</button>
+    <button id="btnPdf" title="Export a PDF report">⬇ PDF</button>
     <button id="btnRefresh" title="Reload tiles and recompute all analyses">⟳ Refresh</button>
     <button id="btnPanel" class="only-narrow">☰</button>
   </header>
@@ -123,12 +125,20 @@
     <div class="phead"><b id="pTitle">Profile</b><span id="pStats"></span><button id="pEq" class="mini" title="Equal horizontal and vertical scale">1:1</button><button id="pClose" class="mini">✕</button></div>
     <div id="pWrap"><canvas id="pCanvas"></canvas><div id="pTip" hidden></div></div>
   </section>
+  <div id="toolbar" hidden><div class="tbrow"><b id="tbName"></b><button id="tbAdd" class="on">＋ Add</button><button id="tbEdit">✎ Move</button><button id="tbX" title="Finish this tool">✕</button></div><div id="tbHint"></div></div>
+  <div id="pdfDlg" hidden><div class="dlg"><h3>Export PDF</h3>
+    <label class="chk"><input type="radio" name="pdfScope" id="pdfIsr" checked> Entire Israel map</label>
+    <label class="chk"><input type="radio" name="pdfScope" id="pdfRoi"> <span id="pdfRoiTxt">Focus area</span></label>
+    <label class="chk"><input type="checkbox" id="pdfTables" checked> Include tables of points, lines and areas</label>
+    <p class="hint">The picture is a top view (north up) of what is currently shown on the map: base map, hillshade and your elements. Choose the base map first in the Layers tab.</p>
+    <div class="row"><button id="pdfGo" class="primary">Create PDF</button><button id="pdfCancel">Cancel</button></div></div></div>
   <div id="fab" hidden><button id="fFinish" class="primary">Finish</button><button id="fCancel">Cancel</button></div>
   <div id="toast"></div>
   <div id="busy" hidden><span></span>Computing…</div>
 </div>
 <script src="https://unpkg.com/maplibre-gl@5.22.0/dist/maplibre-gl.js"></script>
 <script src="https://unpkg.com/proj4@2.15.0/dist/proj4.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

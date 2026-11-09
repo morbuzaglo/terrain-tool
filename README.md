@@ -22,6 +22,8 @@ No open 10 m model exists for Israel: Copernicus EEA-10 is Europe only; Survey o
 - **Line of sight** – viewshed from a point (radius up to 30 km): visible area green, hidden red, % and km².
 - **Focus area** – circle (coordinate + radius) or polygon; analyses run only inside it.
 - **Find terrain features** – filter by elevation, slope and facing direction (highlighted on the map), contour lines, peaks list, area statistics.
+- **Tool mode** – a tool opens a small bar on the map: ＋ Add creates, ✎ Move drags the tool's own points, ✕ finishes. With no tool active nothing on the map reacts, so panning never moves points. Undo/redo (Ctrl+Z) covers elements and the focus area; ✎ in the Results list renames points, lines, areas.
+- **PDF export** – top-view map picture (whole Israel or the focus area) plus tables of points, lines, measurements and areas.
 - **Layers** – satellite / topo / streets / dark, 3D terrain with exaggeration and pitch, hillshade, per-layer toggles.
 - **Projects** – new/open/delete, autosave in the browser, export/import JSON file.
 
