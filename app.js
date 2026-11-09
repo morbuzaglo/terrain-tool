@@ -62,13 +62,14 @@ function parseCoord(str) {
 
 /* ---------- DEM (z12 Terrarium tiles decoded to float arrays) ---------- */
 const DEM = {
-  tiles: new Map(), loading: new Map(),
-  key: (x, y) => x * 100000 + y,
+  tiles: new Map(), loading: new Map(), model: 'dtm',
+  key(x, y) { return (this.model === 'dtm' ? 1e12 : 0) + x * 100000 + y; },
+  dir() { return this.model === 'dtm' ? 'tiles_dtm' : 'tiles'; },
   load(tx, ty) {
     const k = this.key(tx, ty);
     if (this.tiles.has(k)) return Promise.resolve();
     if (this.loading.has(k)) return this.loading.get(k);
-    const p = fetch(`tiles/${ZD}/${tx}/${ty}.png`).then(r => { if (!r.ok) throw 0; return r.blob(); })
+    const p = fetch(`${this.dir()}/${ZD}/${tx}/${ty}.png`).then(r => { if (!r.ok) throw 0; return r.blob(); })
       .then(b => createImageBitmap(b, { premultiplyAlpha: 'none', colorSpaceConversion: 'none' }))
       .then(bm => {
         const c = document.createElement('canvas'); c.width = c.height = 256;
@@ -76,11 +77,11 @@ const DEM = {
         const d = x.getImageData(0, 0, 256, 256).data, a = new Float32Array(65536);
         for (let i = 0; i < 65536; i++) a[i] = d[i * 4] * 256 + d[i * 4 + 1] + d[i * 4 + 2] / 256 - 32768;
         this.tiles.set(k, a);
-      }).catch(() => { this.tiles.set(k, null); }).finally(() => this.loading.delete(k));
+      }).catch(() => { this.tiles.set(k, null); }).finally(() => this.loading.delete(k));    // k captured at start, so a model switch mid-load cannot mix tiles
     this.loading.set(k, p); return p;
   },
   async ensure(keys) {
-    const need = [...keys].filter(k => !this.tiles.has(k.x * 100000 + k.y));
+    const need = [...keys].filter(k => !this.tiles.has(this.key(k.x, k.y)));
     for (let i = 0; i < need.length; i += 24) await Promise.all(need.slice(i, i + 24).map(k => this.load(k.x, k.y)));
   },
   async ensureLL(pts) {                                            // list of [lon,lat]
@@ -106,7 +107,7 @@ const DEM = {
 const DEF = () => ({
   v: 1, name: 'New project', view: { center: [35.0, 31.45], zoom: 7.6, pitch: 60, bearing: 0 },
   roi: null, items: [], viewshed: null,
-  set: { base: 'sat', l3d: true, ex: 1.5, pitch: 60, lHs: true, hs: 0.5, lItems: true, lRoi: true, lView: true, lCont: true, lMask: true, lPeaks: true,
+  set: { model: 'dtm', base: 'sat', l3d: true, ex: 1.5, pitch: 60, lHs: true, hs: 0.5, lItems: true, lRoi: true, lView: true, lCont: true, lMask: true, lPeaks: true,
     hObs: 2, hTgt: 0, vsR: 8, curv: true, fEmin: '', fEmax: '', fSmin: '', fSmax: '', fAsp: '', fAspTol: 45, cInt: 20, pSep: 600 }
 });
 let S = DEF(), PID = null;
@@ -118,6 +119,7 @@ const uid = () => Math.random().toString(36).slice(2, 9);
 
 /* ---------- map ---------- */
 const hsPaint = k => ({ 'hillshade-exaggeration': k, 'hillshade-shadow-color': '#05080b', 'hillshade-highlight-color': '#ffffff', 'hillshade-accent-color': '#2a3a44', 'hillshade-illumination-direction': 315 });
+const demSrc = (id, dir, attribution) => ({ [id]: { type: 'raster-dem', tiles: [new URL(dir + '/{z}/{x}/{y}.png', location.href).href.replace(/%7B/g, '{').replace(/%7D/g, '}')], tileSize: 256, minzoom: 7, maxzoom: 12, encoding: 'terrarium', bounds: BOUNDS, ...(attribution ? { attribution } : {}) } });
 function style() {
   const raster = (id, tiles, att, max = 19) => ({ [id]: { type: 'raster', tiles, tileSize: 256, maxzoom: max, attribution: att } });
   return {
@@ -126,13 +128,16 @@ function style() {
       ...raster('sat', ['https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}'], 'Imagery © Esri, Maxar, Earthstar Geographics', 18),
       ...raster('osm', ['https://tile.openstreetmap.org/{z}/{x}/{y}.png'], '© OpenStreetMap contributors'),
       ...raster('topo', ['https://tile.opentopomap.org/{z}/{x}/{y}.png'], '© OpenTopoMap (CC-BY-SA), © OpenStreetMap', 17),
-      dem: { type: 'raster-dem', tiles: [new URL('tiles/{z}/{x}/{y}.png', location.href).href.replace(/%7B/g, '{').replace(/%7D/g, '}')], tileSize: 256, minzoom: 7, maxzoom: 12, encoding: 'terrarium', bounds: BOUNDS, attribution: 'Elevation: Copernicus GLO-30 © ESA' },
-      hs: { type: 'raster-dem', tiles: [new URL('tiles/{z}/{x}/{y}.png', location.href).href.replace(/%7B/g, '{').replace(/%7D/g, '}')], tileSize: 256, minzoom: 7, maxzoom: 12, encoding: 'terrarium', bounds: BOUNDS },
+      ...demSrc('dem', 'tiles', 'DSM: Copernicus GLO-30 © DLR, Airbus, EU, ESA'),
+      ...demSrc('hs', 'tiles'),
+      ...demSrc('demd', 'tiles_dtm', 'DTM: FABDEM V1-2 © Univ. Bristol (CC BY-NC-SA 4.0)'),
+      ...demSrc('hsd', 'tiles_dtm'),
     },
     layers: [
       { id: 'bg', type: 'background', paint: { 'background-color': '#0b1115' } },
       ...['sat', 'topo', 'osm'].map(id => ({ id: 'b-' + id, type: 'raster', source: id, layout: { visibility: 'none' } })),
       { id: 'hillshade', type: 'hillshade', source: 'hs', paint: hsPaint(0.5) },
+      { id: 'hillshade-dtm', type: 'hillshade', source: 'hsd', paint: hsPaint(0.5) },
     ]
   };
 }
@@ -170,10 +175,13 @@ const BLANK = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAA
 
 function applySettings() {
   const s = S.set; if (!map.getLayer('hillshade')) return;
+  DEM.model = s.model === 'dsm' ? 'dsm' : 'dtm'; const dtm = DEM.model === 'dtm';
   for (const id of ['sat', 'topo', 'osm']) map.setLayoutProperty('b-' + id, 'visibility', s.base === id ? 'visible' : 'none');
-  map.setLayoutProperty('hillshade', 'visibility', s.lHs ? 'visible' : 'none');
-  map.setPaintProperty('hillshade', 'hillshade-exaggeration', +s.hs);
-  if (s.l3d) map.setTerrain({ source: 'dem', exaggeration: +s.ex }); else map.setTerrain(null);
+  map.setLayoutProperty('hillshade', 'visibility', s.lHs && !dtm ? 'visible' : 'none');
+  map.setLayoutProperty('hillshade-dtm', 'visibility', s.lHs && dtm ? 'visible' : 'none');
+  map.setPaintProperty('hillshade', 'hillshade-exaggeration', +s.hs); map.setPaintProperty('hillshade-dtm', 'hillshade-exaggeration', +s.hs);
+  if (s.l3d) map.setTerrain({ source: dtm ? 'demd' : 'dem', exaggeration: +s.ex }); else map.setTerrain(null);
+  $('#dataNote').textContent = dtm ? 'Elevation model: DTM (bare earth) = FABDEM V1-2, Copernicus GLO-30 with trees and buildings removed by machine learning; 30 m. © Univ. Bristol / Fathom, licence CC BY-NC-SA 4.0 (non-commercial use only). Vertical error is a few metres and larger in dense forest and cities.' : 'Elevation model: DSM (surface) = Copernicus GLO-30 (ESA, TanDEM-X 2011–2015, 30 m, vertical accuracy about ±2–4 m). Tree tops and buildings are included.';
   const vis = (id, on) => map.getLayer(id) && map.setLayoutProperty(id, 'visibility', on ? 'visible' : 'none');
   vis('lines', s.lItems); vis('lines-casing', s.lItems); vis('roi-fill', s.lRoi); vis('roi-line', s.lRoi); vis('viewshed', s.lView); vis('contours', s.lCont); vis('mask', s.lMask); vis('peaks', s.lPeaks);
   for (const ms of markers.values()) for (const m of ms) m.getElement().style.display = s.lItems ? '' : 'none';
@@ -332,22 +340,24 @@ function fly(it) {
 /* ---------- profile chart ---------- */
 function showProfile(it) {
   const r = it.res; if (!r) return;
-  $('#profile').hidden = false; $('#pTitle').textContent = 'Hill line profile';
+  $('#profile').hidden = false; $('#pTitle').textContent = 'Hill line profile · ' + (DEM.model === 'dtm' ? 'DTM' : 'DSM');
   $('#pStats').textContent = `${fmt(r.D, 0)} m · top of hill ${fmt(r.bestEx, 1)} m above line · LOS ${r.visible ? 'clear' : 'blocked'}`;
   requestAnimationFrame(() => drawProfile(r));
 }
-let lastRes = null;
+let lastRes = null, EQ = false;
 function drawProfile(r, hoverI) {
   lastRes = r;
   const cv = $('#pCanvas'), W = cv.clientWidth, H = cv.clientHeight, dpr = devicePixelRatio || 1;
   cv.width = W * dpr; cv.height = H * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr); g.clearRect(0, 0, W, H);
-  const L = 52, Rm = 14, T = 14, B = 26, w = W - L - Rm, h = H - T - B;
+  const L = 52, Rm = 14, T = 14, B = 26; let w = W - L - Rm, h = H - T - B; const h0 = h;
   let lo = Infinity, hi = -Infinity; for (let i = 0; i <= r.n; i++) { lo = Math.min(lo, r.eff[i]); hi = Math.max(hi, r.eff[i]); }
   lo = Math.min(lo, r.sA, r.sB); hi = Math.max(hi, r.sA, r.sB); const pad = (hi - lo) * 0.12 + 5; lo -= pad; hi += pad;
-  const X = d => L + d / r.D * w, Y = z => T + (1 - (z - lo) / (hi - lo)) * h;
+  let yOff = 0;
+  if (EQ) { const sc = Math.min(w / r.D, h / (hi - lo)); w = r.D * sc; h = (hi - lo) * sc; yOff = (h0 - h) / 2; }
+  const X = d => L + d / r.D * w, Y = z => T + yOff + (1 - (z - lo) / (hi - lo)) * h;
   const css = getComputedStyle(document.documentElement);
   g.font = '11px JetBrains Mono, monospace'; g.fillStyle = '#8ba0ab'; g.strokeStyle = '#24343e'; g.lineWidth = 1;
-  const step = niceStep((hi - lo) / 4);
+  const step = niceStep((hi - lo) / Math.max(2, Math.min(5, Math.floor(h / 36))));
   for (let v = Math.ceil(lo / step) * step; v < hi; v += step) { g.beginPath(); g.moveTo(L, Y(v)); g.lineTo(L + w, Y(v)); g.stroke(); g.textAlign = 'right'; g.fillText(fmt(v), L - 6, Y(v) + 4); }
   const dstep = niceStep(r.D / (W < 500 ? 3 : 6)); g.textAlign = 'center';
   for (let v = 0; v <= r.D; v += dstep) g.fillText(v >= 1000 ? fmt(v / 1000, v % 1000 ? 1 : 0) + ' km' : fmt(v) + ' m', X(v), H - 8);
@@ -357,13 +367,16 @@ function drawProfile(r, hoverI) {
   g.setLineDash([5, 4]); g.strokeStyle = '#8ba0ab'; g.lineWidth = 1; g.beginPath(); g.moveTo(X(0), Y(r.zA)); g.lineTo(X(r.D), Y(r.zB)); g.stroke(); g.setLineDash([]);
   g.strokeStyle = r.visible ? '#5fd38a' : '#ef6a5b'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(0), Y(r.sA)); g.lineTo(X(r.D), Y(r.sB)); g.stroke();
   const f = r.dEx / r.D, cz = r.zA + (r.zB - r.zA) * f;                // hill height marker (vertical above chord)
-  g.strokeStyle = '#ef6a5b'; g.lineWidth = 2; g.beginPath(); g.moveTo(X(r.dEx), Y(cz)); g.lineTo(X(r.dEx), Y(r.eff[r.iEx])); g.stroke();
+  g.strokeStyle = '#ef6a5b'; g.lineWidth = 2; g.beginPath();
+  if (EQ) { const dz = r.zB - r.zA, t = (r.dEx * r.D + (r.eff[r.iEx] - r.zA) * dz) / (r.D * r.D + dz * dz); g.moveTo(X(t * r.D), Y(r.zA + t * dz)); } else g.moveTo(X(r.dEx), Y(cz));
+  g.lineTo(X(r.dEx), Y(r.eff[r.iEx])); g.stroke();
   g.fillStyle = '#ef6a5b'; g.beginPath(); g.arc(X(r.dEx), Y(r.eff[r.iEx]), 4, 0, 7); g.fill();
   const lab = `${fmt(r.bestEx, 1)} m above line · ${fmt(r.zEx, 0)} m asl`, tw = g.measureText(lab).width;
   g.fillStyle = '#dbe7ec'; g.textAlign = 'left'; g.fillText(lab, Math.max(4, Math.min(W - 4 - tw, X(r.dEx) - tw / 2)), Math.max(T + 10, Y(r.eff[r.iEx]) - 9));
   g.fillStyle = '#40d6c2'; g.beginPath(); g.arc(X(0), Y(r.sA), 4, 0, 7); g.arc(X(r.D), Y(r.sB), 4, 0, 7); g.fill();
   if (hoverI != null) { const x = X(r.d[hoverI]); g.strokeStyle = '#ffffff88'; g.lineWidth = 1; g.beginPath(); g.moveTo(x, T); g.lineTo(x, T + h); g.stroke(); }
   cv._geo = { L, w, r };
+  g.fillStyle = '#8ba0ab'; g.textAlign = 'right'; g.fillText(EQ ? 'true scale 1:1 (perpendicular is 90°)' : 'vertical scale exaggerated', W - 8, T + 2);
 }
 const niceStep = s => { const p = 10 ** Math.floor(Math.log10(s)), m = s / p; return (m < 1.5 ? 1 : m < 3.5 ? 2 : m < 7.5 ? 5 : 10) * p; };
 let hoverMk = null;
@@ -377,6 +390,7 @@ $('#pCanvas').addEventListener('mousemove', ev => {
 $('#pCanvas').addEventListener('mouseleave', () => { $('#pTip').hidden = true; if (lastRes) drawProfile(lastRes); if (hoverMk) { hoverMk.remove(); hoverMk = null; } });
 window.addEventListener('resize', () => { if (!$('#profile').hidden && lastRes) drawProfile(lastRes); });
 $('#pClose').onclick = () => $('#profile').hidden = true;
+$('#pEq').onclick = () => { EQ = !EQ; $('#pEq').classList.toggle('on', EQ); if (lastRes) drawProfile(lastRes); };
 
 /* ---------- viewshed ---------- */
 function setImage(id, canvas, bbox) {
@@ -529,7 +543,7 @@ async function openProject(id, data) {
   try { for (const it of S.items) await compute(it); if (S.roi) await roiChanged(); renderAll(); if (S.viewshed) await runViewshed(); } finally { busy(false); }
   if (!PID) saveNow(); else { try { localStorage.setItem(LS + '.cur', PID); } catch (_) { } renderProjects(); }
 }
-const SETIDS = { base: 'base', l3d: 'l3d', ex: 'ex', pitch: 'pitch', lHs: 'lHs', hs: 'hs', lItems: 'lItems', lRoi: 'lRoi', lView: 'lView', lCont: 'lCont', lMask: 'lMask', lPeaks: 'lPeaks', hObs: 'hObs', hTgt: 'hTgt', vsR: 'vsR', curv: 'curv', fEmin: 'fEmin', fEmax: 'fEmax', fSmin: 'fSmin', fSmax: 'fSmax', fAsp: 'fAsp', fAspTol: 'fAspTol', cInt: 'cInt', pSep: 'pSep' };
+const SETIDS = { model: 'model', base: 'base', l3d: 'l3d', ex: 'ex', pitch: 'pitch', lHs: 'lHs', hs: 'hs', lItems: 'lItems', lRoi: 'lRoi', lView: 'lView', lCont: 'lCont', lMask: 'lMask', lPeaks: 'lPeaks', hObs: 'hObs', hTgt: 'hTgt', vsR: 'vsR', curv: 'curv', fEmin: 'fEmin', fEmax: 'fEmax', fSmin: 'fSmin', fSmax: 'fSmax', fAsp: 'fAsp', fAspTol: 'fAspTol', cInt: 'cInt', pSep: 'pSep' };
 function readSettings() { for (const [k, id] of Object.entries(SETIDS)) { const el = $('#' + id); S.set[k] = el.type === 'checkbox' ? el.checked : el.value; } S.name = $('#projName').value || 'Untitled'; }
 function writeSettings() { for (const [k, id] of Object.entries(SETIDS)) { const el = $('#' + id); if (el.type === 'checkbox') el.checked = !!S.set[k]; else el.value = S.set[k]; } $('#exOut').textContent = (+S.set.ex).toFixed(1) + '×'; $('#pitchOut').textContent = S.set.pitch + '°'; $('#hsOut').textContent = (+S.set.hs).toFixed(2); }
 
@@ -552,7 +566,9 @@ function bind() {
   $('#btnAnalyse').onclick = runAnalysis; $('#btnAnClear').onclick = clearAnalysis;
   $('#btnClearItems').onclick = () => { if (!S.items.length && !S.viewshed) return; S.items.forEach(i => clearMarkers(i.id)); clearMarkers('vs'); S.items = []; S.viewshed = null; setImage('viewshed', null); $('#profile').hidden = true; renderAll(false); autosave(); };
   $('#goForm').onsubmit = async ev => { ev.preventDefault(); const c = parseCoord($('#goInput').value); if (!c) return toast('Enter "lat, lon" or "ITM E N".'); map.flyTo({ center: [c.lon, c.lat], zoom: 13 }); const it = { id: uid(), type: 'point', ll: [c.lon, c.lat], label: 'P' + (S.items.filter(i => i.type === 'point').length + 1) }; S.items.push(it); await update(it); renderItems(); };
-  $('#btnRefresh').onclick = async () => { busy(true); await tick(); DEM.clear(); for (const sid of ['dem', 'hs']) { const src = map.getSource(sid); if (src && src.reload) src.reload(); } try { for (const it of S.items) await compute(it); renderAll(); if (S.roi) await roiChanged(); if (S.viewshed) await runViewshed(); if (analysis) await runAnalysis(); toast('Refreshed'); } finally { busy(false); } };
+  const recomputeAll = async (clear, msg) => { busy(true); await tick(); if (clear) { DEM.clear(); for (const sid of ['dem', 'hs', 'demd', 'hsd']) { const src = map.getSource(sid); if (src && src.reload) src.reload(); } } try { for (const it of S.items) await compute(it); renderAll(); if (S.roi) await roiChanged(); if (S.viewshed) await runViewshed(); if (analysis) await runAnalysis(); if (msg) toast(msg); } finally { busy(false); } };
+  $('#btnRefresh').onclick = () => recomputeAll(true, 'Refreshed');
+  $('#model').addEventListener('change', async () => { readSettings(); applySettings(); autosave(); await recomputeAll(false, 'Elevation model: ' + (S.set.model === 'dtm' ? 'DTM (bare earth)' : 'DSM (surface)')); });
   $('#projName').addEventListener('input', () => { S.name = $('#projName').value; autosave(); });
   $('#pNew').onclick = () => { if (PID) saveNow(); openProject(null, DEF()); };
   $('#pSave').onclick = () => { saveNow(); toast('Saved'); };
@@ -567,8 +583,9 @@ function zoomRoi() { if (!S.roi) return; const b = roiBBox(); map.fitBounds([[b[
 (async function () {
   let cur = null; try { cur = localStorage.getItem(LS + '.cur'); } catch (_) { }
   const a = loadAll(); if (cur && a[cur]) { S = Object.assign(DEF(), a[cur].data); S.set = Object.assign(DEF().set, a[cur].data.set || {}); PID = cur; }
+  const hasDtm = await fetch('tiles_dtm/meta.json', { method: 'HEAD' }).then(r => r.ok).catch(() => false);
+  if (!hasDtm) { S.set.model = 'dsm'; $('#model option[value=dtm]').disabled = true; }
   writeSettings(); $('#projName').value = S.name; bind(); initMap();
-  $('#dataNote').textContent = 'Elevation: Copernicus GLO-30 DSM (ESA, TanDEM-X 2011–2015, 30 m, vertical accuracy about ±2–4 m). It is a surface model: tree tops and buildings are included.';
   renderProjects();
   map.on('load', async () => { busy(true); await tick(); try { for (const it of S.items) await compute(it); if (S.roi) await roiChanged(); renderAll(); if (S.viewshed) await runViewshed(); } finally { busy(false); } });
   window.__app = { S: () => S, DEM, lineProfile, parseCoord, hav, runViewshed };

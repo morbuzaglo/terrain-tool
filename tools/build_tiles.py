@@ -10,17 +10,24 @@ from PIL import Image
 from scipy.ndimage import map_coordinates
 
 HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CACHE = os.path.join(os.environ.get("LOCALAPPDATA", HERE), "drill-spl-cache")
-OUT = os.path.join(HERE, "tiles")
+CACHE = os.path.join(os.environ.get("LOCALAPPDATA", HERE), "drill-spl-cache" if True else "")
+SRC = sys.argv[1] if len(sys.argv) > 1 else "glo30"          # glo30 (DSM, tiles/) or fabdem (DTM, tiles_dtm/)
+OUT = os.path.join(HERE, "tiles" if SRC == "glo30" else "tiles_dtm")
 LAT0, LAT1, LON0, LON1 = 29.35, 33.50, 34.15, 36.00      # Israel + West Bank + Gaza + Golan + Dead Sea margin
 ZMAX, ZMIN = 12, 7
 BASE = "https://copernicus-dem-30m.s3.amazonaws.com/Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM/Copernicus_DSM_COG_10_{ns}{lat:02d}_00_{ew}{lon:03d}_00_DEM.tif"
 os.makedirs(CACHE, exist_ok=True)
 
 def get_tile(lat, lon):
-    p = os.path.join(CACHE, f"N{lat:02d}E{lon:03d}.tif")
+    if SRC == "fabdem":
+        g = int(math.floor(lat / 10) * 10)
+        url = f"https://huggingface.co/datasets/pavelzaitsau/fabdem-v12/resolve/main/tiles/N{g:02d}E030-N{g+10:02d}E040_FABDEM_V1-2/N{lat:02d}E{lon:03d}_FABDEM_V1-2.tif"
+        p = os.path.join(CACHE, f"FAB_N{lat:02d}E{lon:03d}.tif")
+    else:
+        url = BASE.format(ns="N", lat=lat, ew="E", lon=lon)
+        p = os.path.join(CACHE, f"N{lat:02d}E{lon:03d}.tif")
     if not os.path.exists(p):
-        r = requests.get(BASE.format(ns="N", lat=lat, ew="E", lon=lon), stream=True, timeout=120)
+        r = requests.get(url, stream=True, timeout=180)
         if r.status_code != 200:
             print("missing", lat, lon, r.status_code); return None
         with open(p + ".part", "wb") as f:
@@ -39,7 +46,7 @@ for la in lats:
         r0 = (lats[-1] - la) * N; c0 = (lo - lons[0]) * N
         if a is not None:
             a = a[:N, :N] if a.shape[0] >= N else np.pad(a, ((0, N - a.shape[0]), (0, N - a.shape[1])))
-            a = np.where(a < -500, 0, a)
+            a = np.where(a < -500, 0, a)   # sea / nodata -> 0
             mos[r0:r0 + N, c0:c0 + N] = a[:N, :N]
         print("tile", la, lo, None if a is None else (a.shape, float(a.min()), float(a.max())), flush=True)
 print("mosaic", mos.shape)
@@ -100,7 +107,7 @@ for z in range(ZMAX - 1, ZMIN - 1, -1):
     cur = new
     save(z, cur)
     print("z", z, len(cur), "tiles", flush=True)
-meta = dict(source="Copernicus GLO-30 DSM (ESA, TanDEM-X 2011-2015), release 2022_1", encoding="terrarium", zmin=ZMIN, zmax=ZMAX,
+meta = dict(source=("Copernicus GLO-30 DSM (ESA, TanDEM-X 2011-2015), release 2022_1" if SRC == "glo30" else "FABDEM V1-2 (Hawker et al. 2022, Univ. Bristol / Fathom), CC BY-NC-SA 4.0"), encoding="terrarium", zmin=ZMIN, zmax=ZMAX,
             bounds=[LON0, LAT0, LON1, LAT1], z12_range=[X0, X1, Y0, Y1], bytes=total)
 json.dump(meta, open(os.path.join(OUT, "meta.json"), "w"), indent=1)
 print("done", total / 1e6, "MB")

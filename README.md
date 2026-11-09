@@ -7,6 +7,12 @@ Elevation = **Copernicus GLO-30** DSM (ESA, TanDEM-X 2011–2015, 30 m, release 
 
 Rebuild: `python tools/build_tiles.py` (needs numpy, scipy, pillow, requests, tifffile, imagecodecs).
 
+### DTM (bare earth), default
+`python tools/build_tiles.py fabdem` builds `tiles_dtm/` from **FABDEM V1-2** (Hawker et al. 2022, University of Bristol / Fathom): Copernicus GLO-30 with trees and buildings removed by machine learning, 30 m. Licence **CC BY-NC-SA 4.0**: non-commercial use only, attribution required, derivatives must carry the same licence. Commercial use needs a licence from the FABDEM authors. The Layers tab switches between DTM (default) and DSM; if `tiles_dtm/` is absent the app falls back to DSM.
+
+### Higher resolution?
+No open 10 m model exists for Israel: Copernicus EEA-10 is Europe only; Survey of Israel's national DTM (25 m) is restricted; Mapterhorn's "Israel 10 m" layer is derived from ASTER GDEM (30 m native) and is not more accurate.
+
 ## Tools
 - **Pick point** – WGS84 + Israeli Transverse Mercator (ITM) coordinates and elevation; copy button; draggable.
 - **Measure** – air distance, distance along the terrain, climb and descent.

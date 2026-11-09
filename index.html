@@ -83,6 +83,11 @@
 
     <section data-pane="layers" class="pane">
       <div class="card">
+        <label>Elevation model
+          <select id="model">
+            <option value="dtm">DTM – bare earth (FABDEM)</option>
+            <option value="dsm">DSM – surface (Copernicus)</option>
+          </select></label>
         <label>Base map
           <select id="base">
             <option value="sat">Satellite (Esri)</option>
@@ -118,7 +123,7 @@
   <main id="map"></main>
   <div id="readout"><span id="roLL">–</span><span id="roITM">–</span><span id="roEl">–</span></div>
   <section id="profile" hidden>
-    <div class="phead"><b id="pTitle">Profile</b><span id="pStats"></span><button id="pClose" class="mini">✕</button></div>
+    <div class="phead"><b id="pTitle">Profile</b><span id="pStats"></span><button id="pEq" class="mini" title="Equal horizontal and vertical scale">1:1</button><button id="pClose" class="mini">✕</button></div>
     <div id="pWrap"><canvas id="pCanvas"></canvas><div id="pTip" hidden></div></div>
   </section>
   <div id="fab" hidden><button id="fFinish" class="primary">Finish</button><button id="fCancel">Cancel</button></div>
