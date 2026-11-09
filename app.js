@@ -178,7 +178,7 @@ function initMap() {
   });
   map.on('click', onMapClick);
   map.on('mousedown', startDrag); map.on('touchstart', startDrag); map.on('mousemove', moveDrag); map.on('touchmove', moveDrag); map.on('mouseup', endDrag); map.on('touchend', endDrag); map.on('touchcancel', endDrag);
-  map.on('zoom', renderPtsSoon); map.on('zoomend', renderPts);
+  map.on('zoom', renderPtsSoon); map.on('zoomend', renderPts); map.on('rotate', renderPtsSoon); map.on('rotateend', renderPts);
   map.on('dblclick', e => { if (tool === 'measure' || tool === 'roi-poly') { e.preventDefault(); finish(); } });
   map.on('mousemove', onMove);
   map.on('moveend', () => { S.view = { center: map.getCenter().toArray(), zoom: map.getZoom(), pitch: map.getPitch(), bearing: map.getBearing() }; autosave(); });
@@ -253,6 +253,7 @@ function renderPts() {
     const id = 'pt' + i, m = mpp(f.ll[1], z), mLat = 110574, mLon = 111320 * Math.cos(f.ll[1] * RAD);
     const w = f.ll[0] - PX * m / mLon, e = f.ll[0] + PX * m / mLon, s = f.ll[1] - PX * m / mLat, n = f.ll[1] + PX * m / mLat;
     const cv = document.createElement('canvas'); cv.width = cv.height = 2 * PX * dpr; const g = cv.getContext('2d'); g.scale(dpr, dpr);
+    g.translate(PX, PX); g.rotate(map.getBearing() * RAD); g.translate(-PX, -PX);          // counter-rotate so the label reads upright on screen
     const r = f.kind === 'ms' ? 4 : f.kind === 'h' ? 5 : 8, col = PCOL[f.kind];
     if (f.sel && tool && mode === 'edit') { g.beginPath(); g.arc(PX, PX, r + 7, 0, 7); g.lineWidth = 3; g.strokeStyle = '#ffffff'; g.stroke(); }
     g.beginPath(); g.arc(PX, PX, r + 2.5, 0, 7); g.fillStyle = col + '55'; g.fill();
@@ -339,6 +340,20 @@ async function restore(str) {
   histUI(); autosave();
 }
 async function undo() { if (!H.length) return; await restore(H.pop()); }
+
+/* ---------- my location ---------- */
+function addMyLocation() {
+  if (!navigator.geolocation) { toast('This browser has no location support.'); return; }
+  busy(true); toast('Getting your location…');
+  navigator.geolocation.getCurrentPosition(async pos => {
+    try {
+      commit(); const ll = [pos.coords.longitude, pos.coords.latitude];
+      const it = { id: uid(), type: 'point', ll, name: 'My location', label: 'P' + (S.items.filter(i => i.type === 'point').length + 1), acc: pos.coords.accuracy };
+      S.items.push(it); await update(it); renderItems(); map.flyTo({ center: ll, zoom: Math.max(map.getZoom(), 14) });
+      toast('Added My location (accuracy about ' + Math.round(pos.coords.accuracy) + ' m)');
+    } finally { busy(false); }
+  }, err => { busy(false); toast(err.code === 1 ? 'Location permission denied. Allow it for this site in the browser settings.' : 'Could not get your location.'); }, { enableHighAccuracy: true, timeout: 20000, maximumAge: 0 });
+}
 
 /* ---------- map clicks ---------- */
 async function onMapClick(e) {
@@ -648,7 +663,7 @@ function bind() {
   $('#fFinish').onclick = finish; $('#fCancel').onclick = () => { pending = []; renderPending(); };
   $('#tbX').onclick = () => setTool(tool); $('#tbAdd').onclick = () => setMode('add'); $('#tbEdit').onclick = () => setMode('edit');
   $('#btnUndo').onclick = undo; histUI();
-  $('#btnPdf').onclick = openPdf;
+  $('#btnPdf').onclick = openPdf; $('#btnLoc').onclick = () => { document.body.classList.remove('open'); addMyLocation(); };
   const hh = () => document.documentElement.style.setProperty('--hh', $('#top').offsetHeight + 'px'); hh(); addEventListener('resize', hh); if (document.fonts) document.fonts.ready.then(hh);
   $('#btnPanel').onclick = () => document.body.classList.toggle('open');
   const lay = () => { readSettings(); $('#exOut').textContent = (+S.set.ex).toFixed(1) + '×'; $('#pitchOut').textContent = S.set.pitch + '°'; $('#hsOut').textContent = (+S.set.hs).toFixed(2); applySettings(); autosave(); };
@@ -749,7 +764,7 @@ async function exportPdf(scope, withTables) {
       const sections = [];
       const pts = S.items.filter(i => i.type === 'point'), lines = S.items.filter(i => i.type === 'line' && i.res), ms = S.items.filter(i => i.type === 'measure');
       if (pts.length) sections.push({ t: 'Points', cols: [['Name', .16], ['Latitude, longitude', .30], ['ITM E / N', .30], ['Elevation (m)', .24]], rows: pts.map(i => [dn(i), ll(i.ll), itm(i.ll), fmt(i.elev, 1)]) });
-      if (lines.length) sections.push({ t: 'Hill lines', cols: [['Name', .12], ['A  (lat, lon · elev)', .2], ['B  (lat, lon · elev)', .2], ['Air distance · bearing', .14], ['Hill height above line A–B', .19], ['Line of sight', .15]],
+      if (lines.length) sections.push({ t: 'Hill lines', cols: [['Name', .12], ['A  (lat, lon · elev)', .2], ['B  (lat, lon · elev)', .2], ['Distance · bearing', .14], ['Hill height above line A–B', .19], ['Line of sight', .15]],
         rows: lines.map(i => { const r = i.res; return [dn(i), `${ll(i.a)}\n${fmt(r.zA, 1)} m`, `${ll(i.b)}\n${fmt(r.zB, 1)} m`, `${fmt(r.D, 1)} m\n${fmt(bearing(i.a, i.b), 1)}°`, `${fmt(r.perp, 1)} m at 90° to the line\n${fmt(r.bestEx, 1)} m straight up\nsummit ${fmt(r.zEx, 1)} m, ${km(r.dEx)} from A`, r.visible ? `Clear\nmargin ${fmt(r.minClr, 1)} m` : `Blocked\nby ${fmt(-r.minClr, 1)} m`]; }) });
       if (ms.length) sections.push({ t: 'Distance measurements', cols: [['Name', .14], ['Vertices (lat, lon)', .36], ['Air distance', .16], ['Along terrain', .16], ['Climb / descent', .18]],
         rows: ms.map(i => [dn(i), i.pts.map(ll).join('\n'), `${fmt(i.flat, 1)} m`, `${fmt(i.surf, 1)} m`, `+${fmt(i.up, 0)} m / −${fmt(i.down, 0)} m`]) });
@@ -760,8 +775,9 @@ async function exportPdf(scope, withTables) {
       const LH = 27, PAD = 9, TW = W - 2 * M;
       for (const sec of sections) {
         const cw = sec.cols.map(c => c[1] * TW), head = () => {
-          g.font = `600 20px ${FONT}`; g.fillStyle = '#e3eaee'; g.fillRect(M, y, TW, LH + 2 * PAD); g.fillStyle = '#10181d';
-          let x = M; sec.cols.forEach((c, k) => { g.fillText(c[0], x + 10, y + PAD); x += cw[k]; }); y += LH + 2 * PAD;
+          g.font = `600 19px ${FONT}`; const hl = sec.cols.map((c, k) => wrap(c[0], cw[k] - 20)), hh = Math.max(...hl.map(l => l.length)) * LH + 2 * PAD;
+          g.fillStyle = '#e3eaee'; g.fillRect(M, y, TW, hh); g.fillStyle = '#10181d';
+          let x = M; hl.forEach((l, k) => { l.forEach((ln, j) => g.fillText(ln, x + 10, y + PAD + j * LH)); x += cw[k]; }); y += hh;
         };
         if (y + 150 > Hh - M) newPage();
         g.font = `700 30px ${FONT}`; g.fillText(sec.t, M, y); y += 46; head();
@@ -780,7 +796,7 @@ async function exportPdf(scope, withTables) {
     pages.forEach((c, i) => { if (i) doc.addPage(); doc.addImage(c.toDataURL('image/jpeg', 0.9), 'JPEG', 0, 0, pw, ph, undefined, 'FAST'); });
     const fname = (S.name || 'terrain').replace(/[\\/:*?"<>|]+/g, '_') + '.pdf', blob = doc.output('blob');
     if (pdfUrl) URL.revokeObjectURL(pdfUrl); pdfUrl = URL.createObjectURL(blob);
-    const a = $('#pdfLink'); a.href = pdfUrl; a.download = fname; a.textContent = 'Download ' + fname; pdfFile = new File([blob], fname, { type: 'application/pdf' });
+    const a = $('#pdfLink'); a.href = pdfUrl; a.removeAttribute('download'); a.textContent = 'Open ' + fname + ' in a new tab'; pdfFile = new File([blob], fname, { type: 'application/pdf' });
     $('#pdfShare').hidden = !(navigator.canShare && navigator.canShare({ files: [pdfFile] }));
     $('#pdfOpt').hidden = true; $('#pdfRes').hidden = false; $('#pdfDlg').hidden = false;
   } catch (e) { console.error(e); toast('PDF export failed: ' + (e && e.message || e)); } finally { busy(false); }

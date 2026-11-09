@@ -4,7 +4,14 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Israel Terrain Lab</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 26 11 8l6 10 4-6 9 14z' fill='%2340d6c2'/%3E%3C/svg%3E">
+<link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+<link rel="apple-touch-icon" sizes="180x180" href="icons/apple-touch-icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#0b1115">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Terrain Lab">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.22.0/dist/maplibre-gl.css">
@@ -39,6 +46,7 @@
         <button data-tool="line"><i>⛰</i>Hill line</button>
         <button data-tool="view"><i>◉</i>Line of sight</button>
       </div>
+      <button id="btnLoc" class="wide" title="Add a point at your current GPS position">Add my current location as a point</button>
       <p id="toolHint" class="hint">Choose a tool, then click the map. Esc cancels. Double-click or Enter finishes a measurement.</p>
 
       <details open class="card"><summary>Line of sight / hill line settings</summary>
