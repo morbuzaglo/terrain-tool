@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Israel Terrain Lab</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M2 26 11 8l6 10 4-6 9 14z' fill='%2340d6c2'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.22.0/dist/maplibre-gl.css">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="app">
+  <header id="top">
+    <div class="brand"><svg viewBox="0 0 32 32" width="22" height="22"><path d="M2 26 11 8l6 10 4-6 9 14z" fill="currentColor"/></svg><b>TERRAIN</b><span>LAB</span></div>
+    <input id="projName" class="name" spellcheck="false" title="Project name">
+    <div class="spacer"></div>
+    <form id="goForm" class="go"><input id="goInput" placeholder="Go to: 32.08, 34.78  or ITM 180000 665000" spellcheck="false"><button>Go</button></form>
+    <button id="btnRefresh" title="Reload tiles and recompute all analyses">⟳ Refresh</button>
+    <button id="btnPanel" class="only-narrow">☰</button>
+  </header>
+
+  <aside id="panel">
+    <nav id="tabs">
+      <button data-tab="tools" class="on">Tools</button>
+      <button data-tab="area">Area</button>
+      <button data-tab="layers">Layers</button>
+      <button data-tab="projects">Project</button>
+    </nav>
+
+    <section data-pane="tools" class="pane on">
+      <div class="toolgrid">
+        <button data-tool="pick"><i>⌖</i>Pick point</button>
+        <button data-tool="measure"><i>↔</i>Measure</button>
+        <button data-tool="line"><i>⛰</i>Hill line</button>
+        <button data-tool="view"><i>◉</i>Line of sight</button>
+      </div>
+      <p id="toolHint" class="hint">Choose a tool, then click the map. Esc cancels. Double-click or Enter finishes a measurement.</p>
+
+      <details open class="card"><summary>Line of sight / hill line settings</summary>
+        <div class="grid2">
+          <label>Observer height (m)<input id="hObs" type="number" value="2" step="0.5" min="0"></label>
+          <label>Target height (m)<input id="hTgt" type="number" value="0" step="0.5" min="0"></label>
+          <label>Viewshed radius (km)<input id="vsR" type="number" value="8" step="1" min="0.5" max="30"></label>
+          <label class="chk"><input id="curv" type="checkbox" checked> Earth curvature + refraction</label>
+        </div>
+      </details>
+
+      <h3>Results <button id="btnClearItems" class="mini">clear all</button></h3>
+      <div id="items" class="items"></div>
+    </section>
+
+    <section data-pane="area" class="pane">
+      <details open class="card"><summary>Focus area</summary>
+        <p class="hint">Everything below runs only inside this area, so it stays fast. Draw it on the map or type a coordinate.</p>
+        <div class="toolgrid two">
+          <button data-tool="roi-circle"><i>◯</i>Circle on map</button>
+          <button data-tool="roi-poly"><i>⬠</i>Polygon on map</button>
+        </div>
+        <label>Centre (lat, lon or ITM E N)<input id="roiCenter" placeholder="32.0853, 34.7818" spellcheck="false"></label>
+        <label>Radius (km) <output id="roiROut">5</output><input id="roiR" type="range" min="0.5" max="30" step="0.5" value="5"></label>
+        <div class="row"><button id="roiSet">Set circle</button><button id="roiZoom">Zoom to</button><button id="roiClear">Clear</button></div>
+        <div id="roiInfo" class="info"></div>
+      </details>
+
+      <details open class="card"><summary>Find terrain features</summary>
+        <div class="grid2">
+          <label>Elevation min (m)<input id="fEmin" type="number" placeholder="any"></label>
+          <label>Elevation max (m)<input id="fEmax" type="number" placeholder="any"></label>
+          <label>Slope min (°)<input id="fSmin" type="number" placeholder="any" min="0" max="90"></label>
+          <label>Slope max (°)<input id="fSmax" type="number" placeholder="any" min="0" max="90"></label>
+          <label>Faces (compass °)<input id="fAsp" type="number" placeholder="any" min="0" max="360"></label>
+          <label>± tolerance (°)<input id="fAspTol" type="number" value="45" min="1" max="180"></label>
+          <label>Contour interval (m)<input id="cInt" type="number" value="20" min="1"></label>
+          <label>Peak spacing (m)<input id="pSep" type="number" value="600" min="100"></label>
+        </div>
+        <div class="row"><button id="btnAnalyse" class="primary">Run analysis</button><button id="btnAnClear">Clear</button></div>
+        <div id="anInfo" class="info"></div>
+        <div id="peaks" class="items"></div>
+      </details>
+    </section>
+
+    <section data-pane="layers" class="pane">
+      <div class="card">
+        <label>Base map
+          <select id="base">
+            <option value="sat">Satellite (Esri)</option>
+            <option value="topo">Topographic (OpenTopoMap)</option>
+            <option value="osm">Streets (OpenStreetMap)</option>
+            <option value="dark">None (dark)</option>
+          </select></label>
+        <label class="chk"><input id="l3d" type="checkbox" checked> 3D terrain</label>
+        <label>Vertical exaggeration <output id="exOut">1.5×</output><input id="ex" type="range" min="1" max="5" step="0.1" value="1.5"></label>
+        <label>Pitch <output id="pitchOut">60°</output><input id="pitch" type="range" min="0" max="80" step="1" value="60"></label>
+        <label class="chk"><input id="lHs" type="checkbox" checked> Hillshade</label>
+        <label>Hillshade strength <output id="hsOut">0.5</output><input id="hs" type="range" min="0" max="1" step="0.05" value="0.5"></label>
+      </div>
+      <div class="card">
+        <label class="chk"><input id="lItems" type="checkbox" checked> Points, lines and measurements</label>
+        <label class="chk"><input id="lRoi" type="checkbox" checked> Focus area</label>
+        <label class="chk"><input id="lView" type="checkbox" checked> Line-of-sight overlay</label>
+        <label class="chk"><input id="lCont" type="checkbox" checked> Contours</label>
+        <label class="chk"><input id="lMask" type="checkbox" checked> Feature mask</label>
+        <label class="chk"><input id="lPeaks" type="checkbox" checked> Peaks</label>
+      </div>
+      <p class="hint" id="dataNote"></p>
+    </section>
+
+    <section data-pane="projects" class="pane">
+      <div class="row"><button id="pNew" class="primary">New project</button><button id="pSave">Save</button></div>
+      <div class="row"><button id="pExport">Export file</button><button id="pImport">Import file</button><input id="pFile" type="file" accept=".json,application/json" hidden></div>
+      <p class="hint">Projects store the view, focus area, points, lines, measurements and settings. They save automatically in this browser; export a file to keep a copy or move it to another computer.</p>
+      <div id="projList" class="items"></div>
+    </section>
+  </aside>
+
+  <main id="map"></main>
+  <div id="readout"><span id="roLL">–</span><span id="roITM">–</span><span id="roEl">–</span></div>
+  <section id="profile" hidden>
+    <div class="phead"><b id="pTitle">Profile</b><span id="pStats"></span><button id="pClose" class="mini">✕</button></div>
+    <div id="pWrap"><canvas id="pCanvas"></canvas><div id="pTip" hidden></div></div>
+  </section>
+  <div id="toast"></div>
+  <div id="busy" hidden><span></span>Computing…</div>
+</div>
+<script src="https://unpkg.com/maplibre-gl@5.22.0/dist/maplibre-gl.js"></script>
+<script src="https://unpkg.com/proj4@2.15.0/dist/proj4.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

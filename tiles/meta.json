@@ -1,0 +1,19 @@
+{
+ "source": "Copernicus GLO-30 DSM (ESA, TanDEM-X 2011-2015), release 2022_1",
+ "encoding": "terrarium",
+ "zmin": 7,
+ "zmax": 12,
+ "bounds": [
+  34.15,
+  29.35,
+  36.0,
+  33.5
+ ],
+ "z12_range": [
+  2436,
+  2457,
+  1643,
+  1698
+ ],
+ "bytes": 110340411
+}
