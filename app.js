@@ -426,6 +426,7 @@ function renderItems() {
     const add = (txt, fn, tip) => { const b = document.createElement('button'); b.className = 'mini'; b.textContent = txt; b.title = tip; b.onclick = fn; bt.append(b); };
     if (it.type === 'point') add('⧉', () => { navigator.clipboard?.writeText(`${it.ll[1].toFixed(6)}, ${it.ll[0].toFixed(6)}`); toast('Coordinates copied'); }, 'Copy lat, lon');
     if (it.type === 'line') add('▤', () => { activeLine = it.id; showProfile(it); }, 'Show profile');
+    if (it.type !== 'roi') add('Edit', () => editItem(it), 'Edit: select it and move its points');
     add('✎', () => rename(it), 'Rename');
     add('⌖', () => fly(it), 'Zoom to');
     add('✕', () => { commit(); if (it.type === 'roi') { S.roi = null; $('#roiInfo').textContent = ''; } else if (it.type === 'view') { S.viewshed = null; setImage('viewshed', null); } else { S.items = S.items.filter(x => x !== it); clearMarkers(it.id); if (activeLine === it.id) $('#profile').hidden = true; } renderAll(false); autosave(); }, 'Delete');
@@ -433,6 +434,11 @@ function renderItems() {
   }
 }
 const dn = it => it.name || (it.type === 'point' ? it.label : it.type === 'line' ? 'Hill line' : 'Distance');
+function editItem(it) {
+  const kind = { point: 'pick', measure: 'measure', line: 'line', view: 'view' }[it.type]; if (!kind) return;
+  tool = kind; $$('[data-tool]').forEach(b => b.classList.toggle('on', b.dataset.tool === tool));
+  document.body.classList.remove('open'); setMode('edit', it.id); fly(it);
+}
 function rename(it) {
   const cur = it.type === 'view' ? S.viewshed.name : it.type === 'roi' ? S.roi.name : it.name || (it.type === 'point' ? it.label : '');
   const v = prompt('Name:', cur || ''); if (v === null) return; commit();
@@ -693,7 +699,7 @@ function bind() {
 function zoomRoi() { if (!S.roi) return; const b = roiBBox(); map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 60 }); }
 
 /* ---------- start ---------- */
-const APP_VERSION = '8';
+const APP_VERSION = '9';
 (async function () {
   try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (_) { }
   let cur = null; try { cur = localStorage.getItem(LS + '.cur'); } catch (_) { }
